@@ -180,6 +180,11 @@ class TicketController {
         });
         return;
       }
+      
+      // Early response to user for better UX
+      await interaction.editReply({
+        content: '正在創建您的客服單，請稍候...'
+      });
 
       // Generate a unique ticket ID
       const ticketId = Math.floor(100000 + Math.random() * 900000).toString();
@@ -387,7 +392,7 @@ class TicketController {
         }
       }
 
-      // Reply to the user with a link to the channel
+      // Update reply to the user with a link to the channel
       await interaction.editReply({
         content: `您的客服單已創建成功！請前往 <#${channel.id}> 繼續。`
       });
@@ -526,7 +531,27 @@ class TicketController {
       // First update ticket status to closed then close the ticket
       await this.ticketService.updateTicketStatus(ticket.id, 'closed');
       await this.ticketService.closeTicket(ticket.id);
-
+      
+      // Remove send message permissions for all users to prevent further messages
+      await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, {
+        SendMessages: false
+      });
+      
+      // For the ticket creator
+      if (ticket.userId) {
+        await interaction.channel.permissionOverwrites.edit(ticket.userId, {
+          SendMessages: false
+        }).catch(() => {}); // Ignore errors if user left server
+      }
+      
+      // For department roles
+      const departmentRoles = await this.ticketService.getDepartmentRoles(ticket.departmentId);
+      for (const roleId of departmentRoles) {
+        await interaction.channel.permissionOverwrites.edit(roleId, {
+          SendMessages: false
+        }).catch(() => {}); // Ignore errors if role was deleted
+      }
+      
       // Send final message before deleting
       await interaction.channel.send({
         content: `此客服單已被 ${interaction.user.tag} 關閉。頻道將在 5 秒後刪除...`

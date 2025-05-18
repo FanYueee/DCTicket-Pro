@@ -30,9 +30,12 @@ module.exports = {
       // Check if user has permission to close
       const isAdmin = Permissions.hasGuildPermission(interaction.member, ['Administrator']);
       const isTicketCreator = interaction.user.id === ticket.userId;
-      const isSupportStaff = interaction.member.roles.cache.some(role => {
-        return this.module.service.getDepartmentRoles(ticket.departmentId).includes(role.id);
-      });
+      
+      // Get department roles first (since it's an async function)
+      const departmentRoles = await this.module.service.getDepartmentRoles(ticket.departmentId);
+      const isSupportStaff = interaction.member.roles.cache.some(role => 
+        departmentRoles.includes(role.id)
+      );
       
       if (!isAdmin && !isTicketCreator && !isSupportStaff) {
         await interaction.reply({
