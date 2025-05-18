@@ -163,7 +163,16 @@ class Bot {
         if (!command) return;
 
         await command.execute(interaction);
-      } else {
+      } 
+      else if (interaction.isMessageContextMenuCommand()) {
+        // Handle message context menu commands (message commands)
+        const command = this.commands.get(interaction.commandName);
+        if (command) {
+          await command.execute(interaction);
+          return;
+        }
+      }
+      else {
         // Dispatch interaction to all modules that have an onInteraction method
         for (const [name, module] of this.modules.entries()) {
           if (typeof module.onInteraction === 'function') {

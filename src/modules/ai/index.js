@@ -15,6 +15,9 @@ class AIModule {
     // Create singleton instances
     this.repository = new AIRepository();
     this.service = new AIService(this.repository);
+    
+    // Bind event handler methods to this instance
+    this.onInteraction = this.onInteraction.bind(this);
   }
   
   async initialize() {
@@ -75,6 +78,44 @@ class AIModule {
   async onReady() {
     logger.info('AI module ready');
     return true;
+  }
+  
+  /**
+   * Handle interactions related to the AI module
+   * @param {Interaction} interaction - The Discord interaction
+   * @returns {Promise<boolean>} Whether the interaction was handled
+   */
+  async onInteraction(interaction) {
+    try {
+      // Handle message context menu commands
+      if (interaction.isMessageContextMenuCommand()) {
+        // Find the command in our collection
+        const command = this.commands.get(interaction.commandName);
+        if (command) {
+          await command.execute(interaction);
+          return true; // We handled this interaction
+        }
+      }
+      
+      // If we got here, this interaction wasn't for us
+      return false;
+    } catch (error) {
+      logger.error(`Error handling AI interaction: ${error.message}`);
+      logger.error(error.stack);
+      
+      // Try to respond to the user
+      try {
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp({ content: '處理您的請求時發生錯誤。', ephemeral: true });
+        } else {
+          await interaction.reply({ content: '處理您的請求時發生錯誤。', ephemeral: true });
+        }
+      } catch (responseError) {
+        logger.error(`Could not respond to interaction: ${responseError.message}`);
+      }
+      
+      return true; // We tried to handle it, even though there was an error
+    }
   }
   
   async shutdown() {
