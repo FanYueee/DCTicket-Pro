@@ -62,15 +62,24 @@ class Embeds {
     const department = config.departments.find(d => d.id === ticket.departmentId);
     if (!department) return null;
 
+    // Get status info from config
+    const status = ticket.status || 'open';
+    const statusConfig = config.ticketStatus[status] || {
+      name: '開啟',
+      emoji: '🟢',
+      color: department.color
+    };
+
     return new EmbedBuilder()
-      .setTitle(`🎫 客服單 #${ticket.id}`)
+      .setTitle(`${statusConfig.emoji} 客服單 #${ticket.id}`)
       .setDescription(`感謝您創建客服單，我們的團隊會儘快處理您的請求。`)
-      .setColor(department.color)
+      .setColor(statusConfig.color || department.color)
       .addFields(
         { name: '用戶', value: userTag, inline: true },
         { name: '部門', value: `${department.emoji} ${department.name}`, inline: true },
         { name: '創建時間', value: new Date(ticket.createdAt).toLocaleString(), inline: true },
-        { name: '問題描述', value: ticket.description || '無描述' }
+        { name: '問題描述', value: ticket.description || '無描述' },
+        { name: '狀態', value: `${statusConfig.emoji} ${statusConfig.name}`, inline: true }
       )
       .setFooter({ text: '請在此頻道中描述您的問題，我們會盡快回覆' })
       .setTimestamp();
@@ -78,16 +87,31 @@ class Embeds {
 
   /**
    * Create the buttons for ticket controls
+   * @param {boolean} showHumanHandoff - Whether to show the human handoff button
    * @returns {ActionRowBuilder} Row with ticket management buttons
    */
-  static ticketControlButtons() {
+  static ticketControlButtons(showHumanHandoff = false) {
+    const buttons = [];
+
+    if (showHumanHandoff) {
+      const handoffButton = new ButtonBuilder()
+        .setCustomId('human_handoff')
+        .setLabel('轉接人工客服')
+        .setEmoji('👨‍💼')
+        .setStyle(ButtonStyle.Primary);
+
+      buttons.push(handoffButton);
+    }
+
     const closeButton = new ButtonBuilder()
       .setCustomId('close_ticket')
       .setLabel('關閉客服單')
       .setEmoji('🔒')
       .setStyle(ButtonStyle.Danger);
 
-    return new ActionRowBuilder().addComponents(closeButton);
+    buttons.push(closeButton);
+
+    return new ActionRowBuilder().addComponents(...buttons);
   }
 
   /**

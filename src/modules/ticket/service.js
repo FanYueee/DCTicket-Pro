@@ -159,6 +159,36 @@ class TicketService {
   }
 
   /**
+   * Update ticket status
+   * @param {String} ticketId - The ticket ID
+   * @param {String} status - The new status
+   * @return {Promise<Boolean>} Success status
+   */
+  async updateTicketStatus(ticketId, status) {
+    try {
+      return await this.repository.updateTicketStatus(ticketId, status);
+    } catch (error) {
+      logger.error(`Error updating ticket status: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Assign a ticket to a staff member
+   * @param {String} ticketId - The ticket ID
+   * @param {String} staffId - The staff user ID
+   * @return {Promise<Boolean>} Success status
+   */
+  async assignTicketToStaff(ticketId, staffId) {
+    try {
+      return await this.repository.assignTicketToStaff(ticketId, staffId);
+    } catch (error) {
+      logger.error(`Error assigning ticket to staff: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
    * Save a message to a ticket
    * @param {Object} message - The message object
    * @return {Promise<Object>} The saved message

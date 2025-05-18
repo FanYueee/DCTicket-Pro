@@ -43,15 +43,27 @@ class Database {
         color TEXT,
         category_id TEXT
       )`,
-      
+
       // Settings Table
       `CREATE TABLE IF NOT EXISTS settings (
         guild_id TEXT NOT NULL,
         panel_channel_id TEXT,
         panel_message_id TEXT,
+        service_hours_enabled BOOLEAN DEFAULT 1,
         PRIMARY KEY (guild_id)
       )`,
-      
+
+      // Service Hours Table
+      `CREATE TABLE IF NOT EXISTS service_hours (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id TEXT NOT NULL,
+        cron_expression TEXT NOT NULL,
+        description TEXT,
+        enabled BOOLEAN DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (guild_id) REFERENCES settings (guild_id)
+      )`,
+
       // Tickets Table
       `CREATE TABLE IF NOT EXISTS tickets (
         id TEXT PRIMARY KEY,
@@ -59,11 +71,15 @@ class Database {
         user_id TEXT NOT NULL,
         department_id TEXT NOT NULL,
         status TEXT NOT NULL,
+        ai_handled BOOLEAN DEFAULT 0,
+        human_handled BOOLEAN DEFAULT 0,
+        staff_id TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         closed_at DATETIME,
         FOREIGN KEY (department_id) REFERENCES departments (id)
       )`,
-      
+
       // Department Roles Table
       `CREATE TABLE IF NOT EXISTS department_roles (
         department_id TEXT NOT NULL,
@@ -71,14 +87,34 @@ class Database {
         PRIMARY KEY (department_id, role_id),
         FOREIGN KEY (department_id) REFERENCES departments (id)
       )`,
-      
+
       // Messages Table
       `CREATE TABLE IF NOT EXISTS messages (
         id TEXT PRIMARY KEY,
         ticket_id TEXT NOT NULL,
         user_id TEXT NOT NULL,
         content TEXT NOT NULL,
+        is_ai BOOLEAN DEFAULT 0,
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (ticket_id) REFERENCES tickets (id)
+      )`,
+
+      // AI Prompts Table
+      `CREATE TABLE IF NOT EXISTS ai_prompts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        department_id TEXT,
+        prompt_text TEXT NOT NULL,
+        is_default BOOLEAN DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (department_id) REFERENCES departments (id)
+      )`,
+
+      // AI Conversations Table for maintaining context
+      `CREATE TABLE IF NOT EXISTS ai_conversations (
+        ticket_id TEXT PRIMARY KEY,
+        context TEXT NOT NULL,
+        last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (ticket_id) REFERENCES tickets (id)
       )`
     ];
@@ -86,7 +122,7 @@ class Database {
     for (const query of queries) {
       await this.run(query);
     }
-    
+
     // Insert default departments if they don't exist yet
     for (const dept of config.departments) {
       await this.run(
@@ -95,7 +131,62 @@ class Database {
         [dept.id, dept.name, dept.description, dept.emoji, dept.color, dept.categoryId]
       );
     }
-    
+
+    // Insert default AI prompts if they don't exist yet
+    if (config.ai && config.ai.enabled) {
+      // First insert default prompt
+      await this.run(
+        `INSERT OR IGNORE INTO ai_prompts (department_id, prompt_text, is_default)
+         SELECT NULL, ?, 1 WHERE NOT EXISTS (SELECT 1 FROM ai_prompts WHERE is_default = 1)`,
+        [config.ai.defaultPrompt]
+      );
+
+      // Then insert department-specific prompts
+      if (config.ai.departmentPrompts) {
+        for (const [deptId, prompt] of Object.entries(config.ai.departmentPrompts)) {
+          await this.run(
+            `INSERT OR IGNORE INTO ai_prompts (department_id, prompt_text, is_default)
+             SELECT ?, ?, 0 WHERE NOT EXISTS (SELECT 1 FROM ai_prompts WHERE department_id = ?)`,
+            [deptId, prompt, deptId]
+          );
+        }
+      }
+    }
+
+    // Insert default service hours if they don't exist yet
+    if (config.serviceHours && config.serviceHours.enabled) {
+      // Get all guild IDs from settings
+      const guilds = await this.all('SELECT guild_id FROM settings');
+
+      for (const guild of guilds) {
+        const guildId = guild.guild_id;
+
+        // Check if service hours already exist for this guild
+        const existingHours = await this.all(
+          'SELECT * FROM service_hours WHERE guild_id = ?',
+          [guildId]
+        );
+
+        // If no hours exist, create default ones
+        if (existingHours.length === 0) {
+          // Default work schedule (Monday to Friday, 9AM-6PM)
+          const defaultSchedules = [
+            {
+              cron: '0 9-17 * * 1-5', // Monday to Friday, 9AM-6PM
+              description: '週一至週五 9:00-18:00'
+            }
+          ];
+
+          for (const schedule of defaultSchedules) {
+            await this.run(
+              'INSERT INTO service_hours (guild_id, cron_expression, description, enabled) VALUES (?, ?, ?, 1)',
+              [guildId, schedule.cron, schedule.description]
+            );
+          }
+        }
+      }
+    }
+
     logger.info('Database tables created/verified successfully.');
   }
 

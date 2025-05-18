@@ -4,6 +4,7 @@ const logger = require('../../core/logger');
 const config = require('../../core/config');
 const Embeds = require('../../utils/embeds');
 const Permissions = require('../../utils/permissions');
+const { service: aiService } = require('../ai');
 
 class TicketController {
   constructor(ticketService) {
@@ -169,7 +170,7 @@ class TicketController {
    */
   async createTicket(interaction, departmentId, description) {
     await interaction.deferReply({ ephemeral: true });
-    
+
     try {
       // Get department details
       const department = await this.ticketService.getDepartment(departmentId);
@@ -179,21 +180,21 @@ class TicketController {
         });
         return;
       }
-      
+
       // Generate a unique ticket ID
       const ticketId = Math.floor(100000 + Math.random() * 900000).toString();
       const ticketUuid = uuidv4();
-      
+
       // Create a channel for the ticket
       const guild = interaction.guild;
       const user = interaction.user;
-      
+
       // Check for department roles
       const departmentRoles = await this.ticketService.getDepartmentRoles(departmentId);
-      
+
       // Create the channel name
       const channelName = `ticket-${department.id}-${ticketId}`;
-      
+
       // Create permission overwrites for the channel
       const permissionOverwrites = [
         {
@@ -219,7 +220,7 @@ class TicketController {
           ]
         }
       ];
-      
+
       // Add permissions for department roles
       for (const roleId of departmentRoles) {
         permissionOverwrites.push({
@@ -231,7 +232,7 @@ class TicketController {
           ]
         });
       }
-      
+
       // Handle category channel
       let categoryId = department.categoryId;
       let categoryChannel = null;
@@ -279,42 +280,113 @@ class TicketController {
       }
 
       const channel = await guild.channels.create(channelOptions);
-      
+
+      // Determine initial status (check if within service hours)
+      const initialStatus = 'open';
+
       // Store the ticket in the database
       const ticket = {
         id: ticketUuid,
         channelId: channel.id,
         userId: user.id,
         departmentId: departmentId,
-        status: 'open',
-        description: description,
+        status: initialStatus,
         createdAt: new Date()
       };
-      
+
       await this.ticketService.createTicket(ticket);
-      
+
+      // Save the description as a special message
+      await this.ticketService.saveMessage({
+        id: uuidv4(),
+        ticketId: ticketUuid,
+        userId: user.id,
+        content: JSON.stringify({isDescription: true, text: description}),
+        timestamp: new Date()
+      });
+
       // Send initial messages in the ticket channel
       const ticketEmbed = Embeds.ticketInfoEmbed({
         id: ticketId,
         departmentId: departmentId,
-        description: description,
+        description: description, // Use the original description value
+        status: initialStatus,
         createdAt: new Date()
       }, user.tag);
-      
-      const buttonsRow = Embeds.ticketControlButtons();
-      
+
+      // Check if AI is enabled to determine whether to show handoff button
+      const showHandoffButton = config.ai && config.ai.enabled;
+      const buttonsRow = Embeds.ticketControlButtons(showHandoffButton);
+
       await channel.send({ content: `<@${user.id}> 歡迎來到您的客服單。` });
       await channel.send({ embeds: [ticketEmbed], components: [buttonsRow] });
-      
+
       // Save the initial message in the database
       await this.ticketService.saveMessage({
         id: uuidv4(),
         ticketId: ticketUuid,
         userId: guild.members.me.id,
-        content: JSON.stringify({ embeds: [ticketEmbed], components: [buttonsRow] }),
+        content: JSON.stringify({
+          embeds: [ticketEmbed],
+          components: [buttonsRow]
+        }),
         timestamp: new Date()
       });
-      
+
+      // Initialize AI conversation if AI is enabled
+      if (config.ai && config.ai.enabled) {
+        try {
+          // Initialize AI conversation context with the initial description and department ID
+          await aiService.context.initializeContext(ticketUuid, description, ticket.departmentId);
+
+          // Check if we're within service hours when creating ticket
+          const isWithinHours = await aiService.isWithinServiceHours(guild.id);
+
+          // If outside service hours, send the new ticket off-hours message
+          if (!isWithinHours) {
+            const newTicketOffHoursMessage = aiService.getNewTicketOffHoursMessage();
+            await channel.send(newTicketOffHoursMessage);
+
+            // Save the message to the database with a special tag
+            await this.ticketService.saveMessage({
+              id: uuidv4(),
+              ticketId: ticketUuid,
+              userId: guild.members.me.id,
+              content: JSON.stringify({
+                isNewTicketOffHoursNotice: true,
+                timestamp: new Date().toISOString(),
+                message: newTicketOffHoursMessage
+              }),
+              timestamp: new Date()
+            });
+          }
+
+          // Process the initial description with AI
+          logger.info(`Processing initial ticket message with department ID: ${ticket.departmentId}`);
+          const aiResponse = await aiService.processMessage(ticket, description);
+
+          if (aiResponse) {
+            // Keep the ticket in 'open' status when AI is handling it
+            // (Simplified status system: open → waitingStaff → closed)
+
+            // Send AI response
+            await channel.send({ content: aiResponse });
+
+            // Save the AI response to the database
+            await this.ticketService.saveMessage({
+              id: uuidv4(),
+              ticketId: ticketUuid,
+              userId: guild.members.me.id,
+              content: aiResponse,
+              isAI: true,
+              timestamp: new Date()
+            });
+          }
+        } catch (error) {
+          logger.error(`Error initializing AI for ticket: ${error.message}`);
+        }
+      }
+
       // Reply to the user with a link to the channel
       await interaction.editReply({
         content: `您的客服單已創建成功！請前往 <#${channel.id}> 繼續。`
@@ -338,9 +410,9 @@ class TicketController {
         '關閉客服單',
         '您確定要關閉這個客服單嗎？所有對話記錄將被保存，但頻道會被刪除。'
       );
-      
+
       const buttons = Embeds.confirmationButtons('confirm_close');
-      
+
       await interaction.reply({
         embeds: [embed],
         components: [buttons],
@@ -356,35 +428,113 @@ class TicketController {
   }
 
   /**
+   * Handle the resolve ticket button click
+   * @param {Interaction} interaction - The button interaction
+   * @return {Promise<void>}
+   */
+  async resolveTicket(interaction) {
+    try {
+      // Get the ticket from the database
+      const ticket = await this.ticketService.getTicketByChannelId(interaction.channel.id);
+
+      if (!ticket) {
+        await interaction.reply({
+          content: '找不到與此頻道相關的客服單。',
+          ephemeral: true
+        });
+        return;
+      }
+
+      // Update ticket status to closed directly
+      await this.ticketService.updateTicketStatus(ticket.id, 'closed');
+
+      // Get department details for the embed
+      const department = await this.ticketService.getDepartment(ticket.departmentId);
+
+      // Get user details
+      const user = await interaction.client.users.fetch(ticket.userId).catch(() => null);
+      const userTag = user ? user.tag : 'Unknown User';
+
+      // Get the ticket description from messages
+      const messages = await this.ticketService.getTicketMessages(ticket.id);
+      let description = '無描述';
+
+      // Find the description message
+      for (const message of messages) {
+        try {
+          const content = JSON.parse(message.content);
+          if (content.isDescription) {
+            description = content.text;
+            break;
+          }
+        } catch (e) {
+          // Not a JSON message, skip
+        }
+      }
+
+      // Create updated ticket info embed
+      const ticketEmbed = Embeds.ticketInfoEmbed({
+        id: interaction.channel.name.split('-').pop(),
+        departmentId: ticket.departmentId,
+        description: description,
+        status: 'closed',
+        createdAt: ticket.createdAt
+      }, userTag);
+
+      // Create control buttons
+      const buttonsRow = Embeds.ticketControlButtons(false);
+
+      // Send notification message
+      await interaction.reply({
+        content: `✅ 此客服單已被 ${interaction.user.tag} 標記為已解決。`,
+      });
+
+      // Update the ticket embed with new status
+      await interaction.channel.send({
+        embeds: [ticketEmbed],
+        components: [buttonsRow]
+      });
+
+    } catch (error) {
+      logger.error(`Error resolving ticket: ${error.message}`);
+      await interaction.reply({
+        content: '標記客服單為已解決時出錯。請稍後再試。',
+        ephemeral: true
+      });
+    }
+  }
+
+  /**
    * Handle the confirmation of closing a ticket
    * @param {Interaction} interaction - The button interaction
    * @return {Promise<void>}
    */
   async confirmCloseTicket(interaction) {
     await interaction.update({ content: '正在關閉客服單...', components: [], embeds: [] });
-    
+
     try {
       // Get the ticket from the database
       const ticket = await this.ticketService.getTicketByChannelId(interaction.channel.id);
-      
+
       if (!ticket) {
         await interaction.editReply({
           content: '找不到與此頻道相關的客服單。'
         });
         return;
       }
-      
-      // Update the ticket status in the database
+
+      // First update ticket status to closed then close the ticket
+      await this.ticketService.updateTicketStatus(ticket.id, 'closed');
       await this.ticketService.closeTicket(ticket.id);
-      
+
       // Send final message before deleting
       await interaction.channel.send({
         content: `此客服單已被 ${interaction.user.tag} 關閉。頻道將在 5 秒後刪除...`
       });
-      
+
       // Archive all messages to the database
       await this.archiveTicketMessages(interaction.channel, ticket.id);
-      
+
       // Wait 5 seconds then delete the channel
       setTimeout(async () => {
         try {
@@ -402,6 +552,119 @@ class TicketController {
   }
 
   /**
+   * Handle human handoff button click
+   * @param {Interaction} interaction - The button interaction
+   * @return {Promise<void>}
+   */
+  async handleHumanHandoff(interaction) {
+    try {
+      // Get the ticket from the database
+      const ticket = await this.ticketService.getTicketByChannelId(interaction.channel.id);
+
+      if (!ticket) {
+        await interaction.reply({
+          content: '找不到與此頻道相關的客服單。',
+          ephemeral: true
+        });
+        return;
+      }
+
+      // Allow human handoff at any time, but include a note if it's outside service hours
+      const isWithinHours = await aiService.isWithinServiceHours(interaction.guild.id);
+
+      // Save the off-hours notice information if outside service hours
+      // But we'll send it AFTER the embed message
+      let offHoursMessage = null;
+      if (!isWithinHours) {
+        offHoursMessage = aiService.getOffHoursMessage();
+
+        // Save the off-hours message to the database with a special tag
+        await this.ticketService.saveMessage({
+          id: uuidv4(),
+          ticketId: ticket.id,
+          userId: interaction.client.user.id,
+          content: JSON.stringify({
+            isOffHoursNotice: true,
+            timestamp: new Date().toISOString(),
+            message: offHoursMessage
+          }),
+          timestamp: new Date()
+        });
+      }
+
+      // Update the ticket status to waiting for staff
+      await this.ticketService.updateTicketStatus(ticket.id, 'waitingStaff');
+
+      // Get department details for mention
+      const department = await this.ticketService.getDepartment(ticket.departmentId);
+      const departmentRoles = await this.ticketService.getDepartmentRoles(ticket.departmentId);
+
+      // Create role mentions for notification
+      const roleMentions = departmentRoles.map(roleId => `<@&${roleId}>`).join(' ');
+
+      // Update the ticket embed to show new status
+      const user = await interaction.client.users.fetch(ticket.userId).catch(() => null);
+      const userTag = user ? user.tag : 'Unknown User';
+
+      // Get the ticket description from messages
+      const messages = await this.ticketService.getTicketMessages(ticket.id);
+      let description = '無描述';
+
+      // Find the description message
+      for (const message of messages) {
+        try {
+          const content = JSON.parse(message.content);
+          if (content.isDescription) {
+            description = content.text;
+            break;
+          }
+        } catch (e) {
+          // Not a JSON message, skip
+        }
+      }
+
+      // Create new ticket info embed with updated status
+      const ticketEmbed = Embeds.ticketInfoEmbed({
+        id: interaction.channel.name.split('-').pop(),
+        departmentId: ticket.departmentId,
+        description: description,
+        status: 'waitingStaff',
+        createdAt: ticket.createdAt
+      }, userTag);
+
+      // Send notification and update ticket status
+      await interaction.update({
+        content: '正在轉接至人工客服...',
+        components: []
+      });
+
+      // Send notification to department roles
+      await interaction.channel.send({
+        content: `${roleMentions}\n\n此客服單已請求人工協助，請盡快回應。`,
+        embeds: [ticketEmbed],
+        components: [Embeds.ticketControlButtons(false)] // No handoff button needed anymore
+      });
+
+      // Send confirmation to the user
+      await interaction.followUp({
+        content: '已通知客服人員，請稍候片刻。',
+        ephemeral: true
+      });
+
+      // Now send the off-hours message if needed (after the embed and confirmation)
+      if (offHoursMessage) {
+        await interaction.channel.send(offHoursMessage);
+      }
+    } catch (error) {
+      logger.error(`Error handling human handoff: ${error.message}`);
+      await interaction.reply({
+        content: `轉接人工客服時出錯: ${error.message}`,
+        ephemeral: true
+      });
+    }
+  }
+
+  /**
    * Archive all messages from a ticket channel
    * @param {TextChannel} channel - The ticket channel
    * @param {String} ticketId - The ticket ID
@@ -412,37 +675,37 @@ class TicketController {
       let lastId = null;
       let allMessages = [];
       let fetchedMessages;
-      
+
       // Fetch all messages in batches of 100
       do {
         const options = { limit: 100 };
         if (lastId) options.before = lastId;
-        
+
         fetchedMessages = await channel.messages.fetch(options);
         allMessages.push(...fetchedMessages.values());
-        
+
         if (fetchedMessages.size > 0) {
           lastId = fetchedMessages.last().id;
         }
       } while (fetchedMessages.size === 100);
-      
+
       // Sort messages by timestamp (oldest first)
       allMessages.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
-      
+
       // Save each message to the database
       for (const message of allMessages) {
         // Skip bot's own messages that have already been saved
         if (message.author.bot && message.embeds.length > 0) continue;
-        
+
         // Process message content
         let content = message.content;
-        
+
         // Handle attachments by adding their URLs to the content
         if (message.attachments.size > 0) {
-          content += '\n\nAttachments:\n' + 
+          content += '\n\nAttachments:\n' +
             [...message.attachments.values()].map(att => att.url).join('\n');
         }
-        
+
         // Save the message
         await this.ticketService.saveMessage({
           id: message.id,
@@ -452,11 +715,159 @@ class TicketController {
           timestamp: message.createdAt
         });
       }
-      
+
       logger.info(`Archived ${allMessages.length} messages for ticket ${ticketId}`);
     } catch (error) {
       logger.error(`Error archiving ticket messages: ${error.message}`);
       throw error;
+    }
+  }
+
+  /**
+   * Handle user messages in ticket channels for AI processing
+   * @param {Message} message - The Discord message
+   * @return {Promise<void>}
+   */
+  async handleTicketMessage(message) {
+    // Ignore bot messages
+    if (message.author.bot) return;
+
+    // Ignore messages not in guild channels
+    if (!message.guild || !message.channel) return;
+
+    try {
+      // Check if this is a ticket channel
+      const ticket = await this.ticketService.getTicketByChannelId(message.channel.id);
+      if (!ticket) return; // Not a ticket channel
+
+      // Skip AI processing if AI is disabled or ticket is waiting for staff
+      if (!config.ai || !config.ai.enabled || ticket.status === 'waitingStaff') return;
+
+      // Skip AI processing if the message author isn't the ticket creator
+      if (message.author.id !== ticket.userId) {
+        // If the message is from a staff member, update the ticket status
+        const member = await message.guild.members.fetch(message.author.id).catch(() => null);
+        if (member) {
+          const departmentRoles = await this.ticketService.getDepartmentRoles(ticket.departmentId);
+          const isStaff = departmentRoles.some(roleId => member.roles.cache.has(roleId));
+
+          if (isStaff) {
+            // Update ticket to waiting for staff status
+            await this.ticketService.updateTicketStatus(ticket.id, 'waitingStaff');
+            await this.ticketService.assignTicketToStaff(ticket.id, message.author.id);
+
+            // Update the ticket embed with new status
+            const user = await message.client.users.fetch(ticket.userId).catch(() => null);
+            const userTag = user ? user.tag : 'Unknown User';
+
+            // Get the ticket description from messages
+            const messages = await this.ticketService.getTicketMessages(ticket.id);
+            let description = '無描述';
+
+            // Find the description message
+            for (const message of messages) {
+              try {
+                const content = JSON.parse(message.content);
+                if (content.isDescription) {
+                  description = content.text;
+                  break;
+                }
+              } catch (e) {
+                // Not a JSON message, skip
+              }
+            }
+
+            // Create updated ticket info embed
+            const ticketEmbed = Embeds.ticketInfoEmbed({
+              id: message.channel.name.split('-').pop(),
+              departmentId: ticket.departmentId,
+              description: description,
+              status: 'waitingStaff',
+              createdAt: ticket.createdAt
+            }, userTag);
+
+            // Send updated status message
+            await message.channel.send({
+              content: `<@${message.author.id}> 已接手處理此客服單。`,
+              embeds: [ticketEmbed],
+              components: [Embeds.ticketControlButtons(false)]
+            });
+          }
+        }
+        return;
+      }
+
+      // Check if we're within service hours before processing
+      const isWithinHours = await aiService.isWithinServiceHours(message.guild.id);
+
+      // Check if we should send an off-hours notice to the user
+      if (!isWithinHours) {
+        // Check if we've sent an off-hours notice in the last hour
+        const messages = await this.ticketService.getTicketMessages(ticket.id);
+        let shouldSendOffHoursMessage = true;
+        const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000); // 1 hour cooldown
+
+        // Check recent messages for off-hours notices
+        for (const msg of messages) {
+          try {
+            const content = JSON.parse(msg.content);
+            if (content.isOffHoursNotice) {
+              const noticeTime = new Date(content.timestamp);
+              // If we sent a notice less than an hour ago, don't send another
+              if (noticeTime > oneHourAgo) {
+                shouldSendOffHoursMessage = false;
+                break;
+              }
+            }
+          } catch (e) {
+            // Not a JSON message or not our off-hours notice, skip
+          }
+        }
+
+        // If we should send the off-hours notice
+        if (shouldSendOffHoursMessage) {
+          const offHoursMessage = aiService.getOffHoursMessage();
+
+          // Save the off-hours message with a timestamp
+          await this.ticketService.saveMessage({
+            id: uuidv4(),
+            ticketId: ticket.id,
+            userId: message.client.user.id,
+            content: JSON.stringify({
+              isOffHoursNotice: true,
+              timestamp: new Date().toISOString(),
+              message: offHoursMessage
+            }),
+            timestamp: new Date()
+          });
+
+          // Send the message
+          await message.channel.send(offHoursMessage);
+        }
+      }
+
+      // Process the message with AI and get a response
+      const aiResponse = await aiService.processMessage(ticket, message.content);
+
+      if (aiResponse) {
+        // Keep the ticket in 'open' status when AI is handling it
+        // (Simplified status system: open → waitingStaff → closed)
+
+        // Send the AI response
+        await message.channel.send(aiResponse);
+
+        // Save the AI response to the database
+        await this.ticketService.saveMessage({
+          id: uuidv4(),
+          ticketId: ticket.id,
+          userId: message.client.user.id,
+          content: aiResponse,
+          isAI: true,
+          timestamp: new Date()
+        });
+      }
+    } catch (error) {
+      logger.error(`Error handling ticket message: ${error.message}`);
     }
   }
 }

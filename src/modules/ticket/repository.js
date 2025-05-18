@@ -259,12 +259,69 @@ class TicketRepository {
   async closeTicket(ticketId) {
     try {
       await database.run(
-        'UPDATE tickets SET status = "closed", closed_at = ? WHERE id = ?',
-        [new Date().toISOString(), ticketId]
+        'UPDATE tickets SET status = "closed", closed_at = ?, updated_at = ? WHERE id = ?',
+        [new Date().toISOString(), new Date().toISOString(), ticketId]
       );
       return true;
     } catch (error) {
       logger.error(`Database error closing ticket: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Update ticket status
+   * @param {String} ticketId - The ticket ID
+   * @param {String} status - The new status
+   * @return {Promise<Boolean>} Success status
+   */
+  async updateTicketStatus(ticketId, status) {
+    try {
+      await database.run(
+        'UPDATE tickets SET status = ?, updated_at = ? WHERE id = ?',
+        [status, new Date().toISOString(), ticketId]
+      );
+      return true;
+    } catch (error) {
+      logger.error(`Database error updating ticket status: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Update ticket AI handling status
+   * @param {String} ticketId - The ticket ID
+   * @param {Boolean} aiHandled - Whether the ticket was handled by AI
+   * @return {Promise<Boolean>} Success status
+   */
+  async updateTicketAIHandled(ticketId, aiHandled) {
+    try {
+      await database.run(
+        'UPDATE tickets SET ai_handled = ?, updated_at = ? WHERE id = ?',
+        [aiHandled ? 1 : 0, new Date().toISOString(), ticketId]
+      );
+      return true;
+    } catch (error) {
+      logger.error(`Database error updating ticket AI handled status: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Assign a ticket to a staff member
+   * @param {String} ticketId - The ticket ID
+   * @param {String} staffId - The staff user ID
+   * @return {Promise<Boolean>} Success status
+   */
+  async assignTicketToStaff(ticketId, staffId) {
+    try {
+      await database.run(
+        'UPDATE tickets SET human_handled = ?, staff_id = ?, updated_at = ? WHERE id = ?',
+        [1, staffId, new Date().toISOString(), ticketId]
+      );
+      return true;
+    } catch (error) {
+      logger.error(`Database error assigning ticket to staff: ${error.message}`);
       throw error;
     }
   }
@@ -278,17 +335,18 @@ class TicketRepository {
     try {
       await database.run(
         `INSERT OR REPLACE INTO messages (
-          id, ticket_id, user_id, content, timestamp
-        ) VALUES (?, ?, ?, ?, ?)`,
+          id, ticket_id, user_id, content, is_ai, timestamp
+        ) VALUES (?, ?, ?, ?, ?, ?)`,
         [
           message.id,
           message.ticketId,
           message.userId,
           message.content,
+          message.isAI ? 1 : 0,
           message.timestamp.toISOString()
         ]
       );
-      
+
       return message;
     } catch (error) {
       logger.error(`Database error saving message: ${error.message}`);

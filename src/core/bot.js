@@ -18,9 +18,10 @@ class Bot {
 
     this.commands = new Collection();
     this.modules = new Map();
-    
+
     this.client.once(Events.ClientReady, this.onReady.bind(this));
     this.client.on(Events.InteractionCreate, this.onInteraction.bind(this));
+    this.client.on(Events.MessageCreate, this.onMessage.bind(this));
   }
 
   async start() {
@@ -50,7 +51,11 @@ class Bot {
         return fs.statSync(path.join(modulesPath, file)).isDirectory();
       });
 
-      for (const folder of modulesFolders) {
+      // Determine load order - modules may have dependencies
+      const loadOrder = this.determineModuleLoadOrder(modulesFolders);
+      logger.info(`Module load order: ${loadOrder.join(', ')}`);
+
+      for (const folder of loadOrder) {
         const modulePath = path.join(modulesPath, folder);
         
         // Check if the module has an index.js file
@@ -82,6 +87,57 @@ class Bot {
       logger.error(`Error loading modules: ${error.message}`);
       throw error;
     }
+  }
+
+  /**
+   * Determine the order to load modules based on dependencies
+   * @param {Array<string>} modules - List of module folder names
+   * @returns {Array<string>} Ordered list of module folder names
+   */
+  determineModuleLoadOrder(modules) {
+    // Define dependencies - which modules need to be loaded before others
+    const dependencies = {
+      'ai': ['service-hours'], // AI module depends on service-hours
+      'ticket': ['ai']         // Ticket module depends on AI
+    };
+    
+    // If service-hours module is disabled in config, remove it from dependencies
+    if (config.serviceHours && config.serviceHours.enabled === false) {
+      delete dependencies['ai']; // AI won't depend on service-hours if disabled
+      logger.info('Service hours module is disabled in config');
+    }
+    
+    // Define a custom order for modules
+    const orderedModules = [];
+    
+    // First, add modules that others depend on
+    const dependedOn = new Set();
+    Object.values(dependencies).forEach(deps => {
+      deps.forEach(dep => dependedOn.add(dep));
+    });
+    
+    // Add modules that are depended on first (if they exist)
+    for (const dep of dependedOn) {
+      if (modules.includes(dep)) {
+        orderedModules.push(dep);
+      }
+    }
+    
+    // Then add modules with dependencies
+    for (const [module, deps] of Object.entries(dependencies)) {
+      if (modules.includes(module) && !orderedModules.includes(module)) {
+        orderedModules.push(module);
+      }
+    }
+    
+    // Finally add any remaining modules
+    for (const module of modules) {
+      if (!orderedModules.includes(module)) {
+        orderedModules.push(module);
+      }
+    }
+    
+    return orderedModules;
   }
 
   async onReady() {
@@ -119,7 +175,7 @@ class Bot {
     } catch (error) {
       logger.error(`Error handling interaction: ${error.message}`);
       logger.error(error.stack);
-      
+
       // Reply to the user if possible
       if (interaction.replied || interaction.deferred) {
         await interaction.followUp({
@@ -132,6 +188,28 @@ class Bot {
           ephemeral: true
         }).catch(err => logger.error(`Could not reply to interaction: ${err.message}`));
       }
+    }
+  }
+
+  /**
+   * Handle message create events
+   * @param {Message} message - The Discord message
+   */
+  async onMessage(message) {
+    try {
+      // Ignore bot messages
+      if (message.author.bot) return;
+
+      // Dispatch message to all modules that have an onMessage method
+      for (const [name, module] of this.modules.entries()) {
+        if (typeof module.onMessage === 'function') {
+          const handled = await module.onMessage(message);
+          if (handled) break; // Stop if a module handled the message
+        }
+      }
+    } catch (error) {
+      logger.error(`Error handling message: ${error.message}`);
+      logger.error(error.stack);
     }
   }
 
