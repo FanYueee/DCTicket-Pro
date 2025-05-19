@@ -215,6 +215,111 @@ class TicketService {
       throw error;
     }
   }
+  
+  /**
+   * Export ticket messages to a file
+   * @param {String} ticketId - The ticket ID
+   * @return {Promise<String|null>} The path to the exported file or null if ticket logging is disabled
+   */
+  async exportTicket(ticketId) {
+    try {
+      // Check if ticket logging is enabled
+      if (!config.enableTicketLogs) {
+        logger.info(`Ticket logging is disabled in config, skipping export of ticket ${ticketId}`);
+        return null;
+      }
+      
+      // Get the ticket data
+      const ticket = await this.repository.getTicket(ticketId);
+      if (!ticket) {
+        throw new Error(`Ticket ${ticketId} not found`);
+      }
+      
+      // Get the department data
+      const department = await this.getDepartment(ticket.departmentId);
+      
+      // Export the ticket messages to a file
+      const filePath = await this.repository.exportTicketMessages(ticketId, ticket, department);
+      
+      return filePath;
+    } catch (error) {
+      logger.error(`Error exporting ticket: ${error.message}`);
+      throw error;
+    }
+  }
+  
+  /**
+   * Send ticket transcript to user
+   * @param {String} ticketId - The ticket ID
+   * @param {Client} client - The Discord client
+   * @return {Promise<Boolean>} Success status
+   */
+  async sendTicketTranscriptToUser(ticketId, client) {
+    try {
+      // Check if ticket logging is enabled
+      if (!config.enableTicketLogs) {
+        logger.info(`Ticket logging is disabled in config, skipping transcript for ticket ${ticketId}`);
+        return true; // Return success without sending transcript
+      }
+      
+      // Get the ticket data
+      const ticket = await this.repository.getTicket(ticketId);
+      if (!ticket) {
+        throw new Error(`Ticket ${ticketId} not found`);
+      }
+      
+      // Get the user
+      const user = await client.users.fetch(ticket.userId).catch(() => null);
+      if (!user) {
+        logger.warn(`Could not find user ${ticket.userId} for ticket ${ticketId}`);
+        return false;
+      }
+      
+      // Get the department
+      const department = await this.getDepartment(ticket.departmentId);
+      
+      // Export the ticket
+      const filePath = await this.exportTicket(ticketId);
+      
+      // If filePath is null, it means ticket logging is disabled
+      if (!filePath) {
+        logger.info(`No transcript file generated for ticket ${ticketId}, skipping sending to user`);
+        return true;
+      }
+      
+      // Try to send the file to the user
+      try {
+        const dmChannel = await user.createDM();
+        await dmChannel.send({
+          content: `您好！以下是您的客服單記錄 (ID: ${ticket.id.split('-')[0]})`,
+          files: [filePath]
+        });
+        logger.info(`Successfully sent ticket transcript for ${ticketId} to user ${user.tag}`);
+        return true;
+      } catch (dmError) {
+        // Log the failure but don't throw an error
+        logger.error(`Failed to send ticket transcript to user ${user.tag}: ${dmError.message}`);
+        return false;
+      }
+    } catch (error) {
+      logger.error(`Error sending ticket transcript: ${error.message}`);
+      return false;
+    }
+  }
+  
+  /**
+   * Get a ticket by ID
+   * @param {String} ticketId - The ticket ID
+   * @return {Promise<Object>} The ticket object
+   */
+  async getTicket(ticketId) {
+    try {
+      return await this.repository.getTicket(ticketId);
+    } catch (error) {
+      logger.error(`Error getting ticket: ${error.message}`);
+      throw error;
+    }
+  }
 }
 
 module.exports = TicketService;

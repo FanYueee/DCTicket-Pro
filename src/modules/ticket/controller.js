@@ -9,6 +9,9 @@ const { service: aiService } = require('../ai');
 class TicketController {
   constructor(ticketService) {
     this.ticketService = ticketService;
+    
+    // Create a set to track AI responses that have been sent
+    this.sentAIResponses = new Set();
   }
 
   /**
@@ -186,9 +189,10 @@ class TicketController {
         content: '正在創建您的客服單，請稍候...'
       });
 
-      // Generate a unique ticket ID
-      const ticketId = Math.floor(100000 + Math.random() * 900000).toString();
+      // Generate a unique UUID
       const ticketUuid = uuidv4();
+      // Get the first section of the UUID (before the first dash)
+      const uuidFirstSection = ticketUuid.split('-')[0];
 
       // Create a channel for the ticket
       const guild = interaction.guild;
@@ -197,8 +201,8 @@ class TicketController {
       // Check for department roles
       const departmentRoles = await this.ticketService.getDepartmentRoles(departmentId);
 
-      // Create the channel name
-      const channelName = `ticket-${department.id}-${ticketId}`;
+      // Create the channel name with department name and UUID first section
+      const channelName = `${department.name}-${uuidFirstSection}`;
 
       // Create permission overwrites for the channel
       const permissionOverwrites = [
@@ -306,13 +310,14 @@ class TicketController {
         id: uuidv4(),
         ticketId: ticketUuid,
         userId: user.id,
+        username: user.tag,
         content: JSON.stringify({isDescription: true, text: description}),
         timestamp: new Date()
       });
 
       // Send initial messages in the ticket channel
       const ticketEmbed = Embeds.ticketInfoEmbed({
-        id: ticketId,
+        id: uuidFirstSection,
         departmentId: departmentId,
         description: description, // Use the original description value
         status: initialStatus,
@@ -331,6 +336,7 @@ class TicketController {
         id: uuidv4(),
         ticketId: ticketUuid,
         userId: guild.members.me.id,
+        username: guild.members.me.user.tag,
         content: JSON.stringify({
           embeds: [ticketEmbed],
           components: [buttonsRow]
@@ -357,6 +363,7 @@ class TicketController {
               id: uuidv4(),
               ticketId: ticketUuid,
               userId: guild.members.me.id,
+              username: guild.members.me.user.tag,
               content: JSON.stringify({
                 isNewTicketOffHoursNotice: true,
                 timestamp: new Date().toISOString(),
@@ -374,14 +381,21 @@ class TicketController {
             // Keep the ticket in 'open' status when AI is handling it
             // (Simplified status system: open → waitingStaff → closed)
 
+            // Generate a new message ID for the Discord message
+            const discordMessageId = uuidv4();
+            
             // Send AI response
-            await channel.send({ content: aiResponse });
-
-            // Save the AI response to the database
+            const sentMessage = await channel.send({ content: aiResponse });
+            
+            // Track that we've already sent this response
+            this.sentAIResponses.add(sentMessage.id);
+            
+            // Save the AI response in our special format
             await this.ticketService.saveMessage({
-              id: uuidv4(),
+              id: discordMessageId,
               ticketId: ticketUuid,
               userId: guild.members.me.id,
+              username: guild.members.me.user.tag,
               content: aiResponse,
               isAI: true,
               timestamp: new Date()
@@ -479,7 +493,7 @@ class TicketController {
 
       // Create updated ticket info embed
       const ticketEmbed = Embeds.ticketInfoEmbed({
-        id: interaction.channel.name.split('-').pop(),
+        id: ticket.id.split('-')[0],
         departmentId: ticket.departmentId,
         description: description,
         status: 'closed',
@@ -552,13 +566,25 @@ class TicketController {
         }).catch(() => {}); // Ignore errors if role was deleted
       }
       
+      // Archive all messages to the database
+      await this.archiveTicketMessages(interaction.channel, ticket.id);
+      
       // Send final message before deleting
       await interaction.channel.send({
         content: `此客服單已被 ${interaction.user.tag} 關閉。頻道將在 5 秒後刪除...`
       });
-
-      // Archive all messages to the database
-      await this.archiveTicketMessages(interaction.channel, ticket.id);
+      
+      // Send ticket transcript to user
+      try {
+        // Export the ticket and send it to the user
+        const success = await this.ticketService.sendTicketTranscriptToUser(ticket.id, interaction.client);
+        if (!success) {
+          logger.warn(`Failed to send ticket transcript to user ${ticket.userId} for ticket ${ticket.id}`);
+        }
+      } catch (transcriptError) {
+        logger.error(`Error sending ticket transcript: ${transcriptError.message}`);
+        // Don't stop the ticket closing process if sending transcript fails
+      }
 
       // Wait 5 seconds then delete the channel
       setTimeout(async () => {
@@ -608,6 +634,7 @@ class TicketController {
           id: uuidv4(),
           ticketId: ticket.id,
           userId: interaction.client.user.id,
+          username: interaction.client.user.tag,
           content: JSON.stringify({
             isOffHoursNotice: true,
             timestamp: new Date().toISOString(),
@@ -650,7 +677,7 @@ class TicketController {
 
       // Create new ticket info embed with updated status
       const ticketEmbed = Embeds.ticketInfoEmbed({
-        id: interaction.channel.name.split('-').pop(),
+        id: ticket.id.split('-')[0],
         departmentId: ticket.departmentId,
         description: description,
         status: 'waitingStaff',
@@ -721,6 +748,11 @@ class TicketController {
       for (const message of allMessages) {
         // Skip bot's own messages that have already been saved
         if (message.author.bot && message.embeds.length > 0) continue;
+        
+        // Skip messages we've already saved as AI responses
+        if (this.sentAIResponses.has(message.id)) {
+          continue;
+        }
 
         // Process message content
         let content = message.content;
@@ -731,11 +763,12 @@ class TicketController {
             [...message.attachments.values()].map(att => att.url).join('\n');
         }
 
-        // Save the message
+        // Save the message with author username
         await this.ticketService.saveMessage({
           id: message.id,
           ticketId: ticketId,
           userId: message.author.id,
+          username: message.author.tag || message.author.username || 'Unknown User',
           content: content,
           timestamp: message.createdAt
         });
@@ -804,7 +837,7 @@ class TicketController {
 
             // Create updated ticket info embed
             const ticketEmbed = Embeds.ticketInfoEmbed({
-              id: message.channel.name.split('-').pop(),
+              id: ticket.id.split('-')[0],
               departmentId: ticket.departmentId,
               description: description,
               status: 'waitingStaff',
@@ -858,6 +891,7 @@ class TicketController {
             id: uuidv4(),
             ticketId: ticket.id,
             userId: message.client.user.id,
+            username: message.client.user.tag,
             content: JSON.stringify({
               isOffHoursNotice: true,
               timestamp: new Date().toISOString(),
@@ -871,21 +905,35 @@ class TicketController {
         }
       }
 
+      // Save user message to database to ensure it's captured in our records
+      await this.ticketService.saveMessage({
+        id: message.id,
+        ticketId: ticket.id,
+        userId: message.author.id,
+        username: message.author.tag || message.author.username || "Unknown User",
+        content: message.content,
+        timestamp: message.createdAt
+      });
+
       // Process the message with AI and get a response
       const aiResponse = await aiService.processMessage(ticket, message.content);
 
       if (aiResponse) {
-        // Keep the ticket in 'open' status when AI is handling it
-        // (Simplified status system: open → waitingStaff → closed)
-
+        // Generate a new message ID for the Discord message
+        const discordMessageId = uuidv4();
+        
         // Send the AI response
-        await message.channel.send(aiResponse);
-
-        // Save the AI response to the database
+        const sentMessage = await message.channel.send(aiResponse);
+        
+        // Track that we've already sent this response to avoid duplicate saving
+        this.sentAIResponses.add(sentMessage.id);
+        
+        // Save AI response as a regular message in DB - using the same ID as the discord message
         await this.ticketService.saveMessage({
-          id: uuidv4(),
+          id: discordMessageId,
           ticketId: ticket.id,
           userId: message.client.user.id,
+          username: message.client.user.tag,
           content: aiResponse,
           isAI: true,
           timestamp: new Date()

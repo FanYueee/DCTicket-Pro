@@ -1,5 +1,8 @@
 const database = require('../../core/database');
 const logger = require('../../core/logger');
+const config = require('../../core/config');
+const fs = require('fs');
+const path = require('path');
 
 class TicketRepository {
   async initialize() {
@@ -333,6 +336,31 @@ class TicketRepository {
    */
   async saveMessage(message) {
     try {
+      // Store username in content JSON if provided
+      let finalContent = message.content;
+      
+      // If username is provided, store it in a special field in content for regular users
+      if (message.username && !message.isAI) {
+        try {
+          // Check if content can be parsed as JSON first
+          try {
+            const parsedContent = JSON.parse(message.content);
+            parsedContent.username = message.username;
+            finalContent = JSON.stringify(parsedContent);
+          } catch (e) {
+            // Not JSON, create a new JSON object with username and original content
+            finalContent = JSON.stringify({
+              text: message.content,
+              username: message.username
+            });
+          }
+        } catch (e) {
+          // If any error occurs, fall back to original content
+          logger.error(`Error adding username to message content: ${e.message}`);
+          finalContent = message.content;
+        }
+      }
+      
       await database.run(
         `INSERT OR REPLACE INTO messages (
           id, ticket_id, user_id, content, is_ai, timestamp
@@ -341,7 +369,7 @@ class TicketRepository {
           message.id,
           message.ticketId,
           message.userId,
-          message.content,
+          finalContent,
           message.isAI ? 1 : 0,
           message.timestamp.toISOString()
         ]
@@ -371,10 +399,182 @@ class TicketRepository {
         ticketId: message.ticket_id,
         userId: message.user_id,
         content: message.content,
+        isAI: Boolean(message.is_ai),
         timestamp: new Date(message.timestamp)
       }));
     } catch (error) {
       logger.error(`Database error getting ticket messages: ${error.message}`);
+      throw error;
+    }
+  }
+  
+  /**
+   * Export ticket messages to a file
+   * @param {String} ticketId - The ticket ID
+   * @param {Object} ticket - The ticket object
+   * @param {Object} department - The department object
+   * @return {Promise<String|null>} The path to the exported file or null if ticket logging is disabled
+   */
+  async exportTicketMessages(ticketId, ticket, department) {
+    try {
+      // Check if ticket logging is enabled in config
+      if (!config.enableTicketLogs) {
+        logger.info(`Ticket logging is disabled in config, skipping export of ticket ${ticketId}`);
+        return null;
+      }
+      
+      // Ensure the directory exists
+      const ticketLogDir = path.join('logs', 'ticket');
+      if (!fs.existsSync(ticketLogDir)) {
+        fs.mkdirSync(ticketLogDir, { recursive: true });
+      }
+      
+      // Get all messages for the ticket
+      const messages = await this.getTicketMessages(ticketId);
+      
+      // Create a file path using the ticket ID as the filename
+      const filePath = path.join(ticketLogDir, `${ticketId}.txt`);
+      
+      // Format the ticket information header
+      let content = `====== 客服單記錄 ======\n`;
+      content += `ID: ${ticketId}\n`;
+      content += `部門: ${department?.name || '未知'}\n`;
+      content += `創建時間: ${ticket.createdAt.toISOString()}\n`;
+      content += `關閉時間: ${ticket.closedAt ? ticket.closedAt.toISOString() : '未關閉'}\n`;
+      content += `狀態: ${ticket.status}\n`;
+      content += `==================\n\n`;
+      
+      // Get user cache for display names
+      const userCache = new Map();
+      
+      // Deduplicate messages by tracking AI response IDs
+      const processedAIMessages = new Set();
+      
+      // Format each message
+      for (const message of messages) {
+        try {
+          // Try to parse content as JSON for special messages
+          let parsedContent;
+          try {
+            parsedContent = JSON.parse(message.content);
+          } catch (e) {
+            // Not JSON, use as is
+            parsedContent = null;
+          }
+          
+          // Format timestamp
+          const timestamp = message.timestamp.toISOString();
+          
+          // Format different types of messages
+          if (parsedContent && parsedContent.isDescription) {
+            content += `[${timestamp}] [問題描述]\n${parsedContent.text}\n\n`;
+          } else if (parsedContent && parsedContent.isOffHoursNotice) {
+            content += `[${timestamp}] [系統通知]\n${parsedContent.message.content || '非服務時間通知'}\n\n`;
+          } else if (parsedContent && parsedContent.isNewTicketOffHoursNotice) {
+            content += `[${timestamp}] [系統通知]\n${parsedContent.message.content || '非服務時間通知'}\n\n`;
+          } else if (parsedContent && parsedContent.embeds) {
+            // Handle embed messages
+            content += `[${timestamp}] [系統嵌入]\n系統嵌入訊息\n\n`;
+          } else if (message.isAI) {
+            // For AI responses, check if this is our new JSON format
+            try {
+              const aiContent = JSON.parse(message.content);
+              if (aiContent.aiResponseId && aiContent.content) {
+                // This is our new format with the unique AI response ID
+                const aiResponseId = aiContent.aiResponseId;
+                
+                // Skip if we've already processed this exact AI response ID
+                if (processedAIMessages.has(aiResponseId)) {
+                  continue;
+                }
+                
+                // Mark this response as processed
+                processedAIMessages.add(aiResponseId);
+                
+                // AI message with the actual content
+                content += `[${timestamp}] [AI回應]\n${aiContent.content}\n\n`;
+                continue;
+              }
+            } catch (e) {
+              // Not our JSON format, continue with regular handling
+            }
+            
+            // Skip if we've already processed an identical AI message content
+            const key = `${message.content}`;
+            if (processedAIMessages.has(key)) {
+              continue;
+            }
+            processedAIMessages.add(key);
+            
+            // Regular AI message
+            content += `[${timestamp}] [AI回應]\n${message.content}\n\n`;
+          } else {
+            // Regular user message - try to get username
+            let userDisplay = message.userId;
+            let actualContent = message.content;
+            
+            // Try to extract username from content if it exists
+            if (parsedContent && parsedContent.username) {
+              if (parsedContent.text) {
+                // This is our special format with username and content
+                actualContent = parsedContent.text;
+              }
+              userDisplay = `${parsedContent.username} (${message.userId})`;
+            } else {
+              // Check if we have a cached username
+              if (!userCache.has(message.userId)) {
+                userCache.set(message.userId, `未知用戶 (${message.userId})`);
+              }
+              userDisplay = userCache.get(message.userId);
+            }
+            
+            content += `[${timestamp}] [${userDisplay}]\n${actualContent}\n\n`;
+          }
+        } catch (e) {
+          // If any error in parsing this message, add it as simple text
+          content += `[${message.timestamp.toISOString()}] [訊息處理錯誤]\n${message.content}\n\n`;
+        }
+      }
+      
+      // Write the content to the file
+      fs.writeFileSync(filePath, content, 'utf8');
+      
+      logger.info(`Exported ticket ${ticketId} to ${filePath}`);
+      return filePath;
+    } catch (error) {
+      logger.error(`Error exporting ticket messages: ${error.message}`);
+      throw error;
+    }
+  }
+  
+  /**
+   * Get a ticket by ID
+   * @param {String} ticketId - The ticket ID
+   * @return {Promise<Object>} The ticket object
+   */
+  async getTicket(ticketId) {
+    try {
+      const ticket = await database.get(
+        'SELECT * FROM tickets WHERE id = ?',
+        [ticketId]
+      );
+      
+      if (!ticket) return null;
+      
+      return {
+        id: ticket.id,
+        channelId: ticket.channel_id,
+        userId: ticket.user_id,
+        departmentId: ticket.department_id,
+        status: ticket.status,
+        aiHandled: Boolean(ticket.ai_handled),
+        humanHandled: Boolean(ticket.human_handled),
+        staffId: ticket.staff_id,
+        createdAt: new Date(ticket.created_at),
+        closedAt: ticket.closed_at ? new Date(ticket.closed_at) : null
+      };
+    } catch (error) {
+      logger.error(`Database error getting ticket by ID: ${error.message}`);
       throw error;
     }
   }

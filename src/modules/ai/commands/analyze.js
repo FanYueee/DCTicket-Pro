@@ -15,7 +15,7 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.SendMessages),
 
   async execute(interaction) {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ ephemeral: false });
 
     try {
       // Get the target message

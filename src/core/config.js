@@ -11,6 +11,7 @@ module.exports = {
 
   // Logging Configuration
   logLevel: process.env.LOG_LEVEL || 'info',
+  enableTicketLogs: process.env.ENABLE_TICKET_LOGS !== 'false', // Enable ticket logs by default
 
   // Ticket Configuration
   departments: [
