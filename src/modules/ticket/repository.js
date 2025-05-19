@@ -578,6 +578,39 @@ class TicketRepository {
       throw error;
     }
   }
+
+  /**
+   * Get a user's ticket by user ID and department
+   * @param {String} userId - The user ID
+   * @param {String} departmentId - The department ID
+   * @return {Promise<Object>} The ticket object
+   */
+  async getTicketByUserId(userId, departmentId) {
+    try {
+      const ticket = await database.get(
+        'SELECT * FROM tickets WHERE user_id = ? AND department_id = ? ORDER BY created_at DESC LIMIT 1',
+        [userId, departmentId]
+      );
+      
+      if (!ticket) return null;
+      
+      return {
+        id: ticket.id,
+        channelId: ticket.channel_id,
+        userId: ticket.user_id,
+        departmentId: ticket.department_id,
+        status: ticket.status,
+        aiHandled: Boolean(ticket.ai_handled),
+        humanHandled: Boolean(ticket.human_handled),
+        staffId: ticket.staff_id,
+        createdAt: new Date(ticket.created_at),
+        closedAt: ticket.closed_at ? new Date(ticket.closed_at) : null
+      };
+    } catch (error) {
+      logger.error(`Database error getting ticket by user ID: ${error.message}`);
+      throw error;
+    }
+  }
 }
 
 module.exports = TicketRepository;

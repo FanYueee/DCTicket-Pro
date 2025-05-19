@@ -111,5 +111,26 @@ module.exports = {
       emoji: '🔒',
       color: '#ED4245'
     }
+  },
+
+  // WHMCS Integration Configuration
+  whmcs: {
+    enabled: process.env.WHMCS_ENABLED === 'true',
+    apiUrl: process.env.WHMCS_API_URL,
+    apiIdentifier: process.env.WHMCS_API_IDENTIFIER,
+    apiSecret: process.env.WHMCS_API_SECRET,
+    panelUrl: process.env.WHMCS_PANEL_URL,
+    logFailures: process.env.WHMCS_LOG_FAILURES === 'true',
+    mockApi: process.env.WHMCS_MOCK_API === 'true' || false,
+    
+    // Synchronization settings
+    syncInterval: parseInt(process.env.WHMCS_SYNC_INTERVAL || '30', 10), // in minutes
+    
+    // Ticket mapping
+    departmentMap: {
+      general: 1, // WHMCS department ID for general
+      billing: 2, // WHMCS department ID for billing
+      tech: 3     // WHMCS department ID for technical support
+    }
   }
 };

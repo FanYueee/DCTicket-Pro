@@ -1,12 +1,13 @@
 {
-  "name": "dc-ticket-bot",
-  "version": "1.0.0",
+  "name": "DCTicket-Pro",
+  "version": "2.4",
   "description": "Discord Ticket Bot with modular architecture",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "deploy": "node src/deploy-commands.js",
+    "clear": "node src/clear-commands.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
@@ -15,17 +16,17 @@
     "ticket",
     "support"
   ],
-  "author": "",
-  "license": "MIT",
+  "author": "FanYueee",
   "dependencies": {
-    "discord.js": "^14.14.1",
-    "sqlite3": "^5.1.7",
-    "winston": "^3.11.0",
-    "dotenv": "^16.4.1",
-    "uuid": "^9.0.1",
     "@google/generative-ai": "^0.2.0",
+    "axios": "^1.9.0",
     "cron-parser": "^4.9.0",
-    "node-cron": "^3.0.3"
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.1",
+    "node-cron": "^3.0.3",
+    "sqlite3": "^5.1.7",
+    "uuid": "^9.0.1",
+    "winston": "^3.11.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.3"
