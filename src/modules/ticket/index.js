@@ -157,12 +157,21 @@ class TicketModule {
     if (!config.ai || !config.ai.enabled) return false;
 
     try {
+      // Check if this is a ticket channel
+      const ticket = await this.repository.getTicketByChannelId(message.channel.id);
+      if (!ticket) return false; // Not a ticket channel, let other modules handle it
+      
       // Pass message to controller for AI processing
       await this.controller.handleTicketMessage(message);
+      
+      // Always return true if it's a ticket channel, even if there's an error
+      // This prevents other modules from also trying to handle this message
       return true;
     } catch (error) {
       logger.error(`Error handling message in ticket module: ${error.message}`);
-      return false;
+      // Still return true to prevent other modules from processing this message
+      // as long as we've identified it as a ticket channel message
+      return true;
     }
   }
 

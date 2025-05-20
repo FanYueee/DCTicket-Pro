@@ -9,6 +9,8 @@ const gemini = require('../gemini');
 const aiLogger = require('../ai-logger');
 
 module.exports = {
+  analysisPrompt: "請分析以下內容，並提供詳細的見解：",
+  
   data: new ContextMenuCommandBuilder()
     .setName('AI 分析')
     .setType(ApplicationCommandType.Message)
@@ -81,9 +83,11 @@ module.exports = {
       aiLogger.logUserMessage(analysisId, null, analysisContent);
 
       // Format for a single message analysis - no chat history, just a direct request
+      const userMessage = `${module.exports.analysisPrompt}\n\n${analysisContent}`;
+      
       const chatHistory = [{
         role: 'user',
-        parts: analysisContent
+        parts: userMessage
       }];
 
       // Generate response from Gemini without using context management
@@ -95,8 +99,8 @@ module.exports = {
         analysisId
       );
 
-      // Log the AI response
-      aiLogger.logResponse(analysisId, null, analysisContent, response);
+      // Log the AI response with the full prompt included
+      aiLogger.logResponse(analysisId, null, userMessage, response);
 
       // Send the response to the user
       await interaction.editReply({

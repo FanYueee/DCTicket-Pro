@@ -13,6 +13,9 @@ class TicketController {
     
     // Create a set to track AI responses that have been sent
     this.sentAIResponses = new Set();
+    
+    // Create a set to track processed user messages to prevent duplicate AI processing
+    this.processedUserMessages = new Set();
   }
 
   /**
@@ -818,6 +821,15 @@ class TicketController {
 
     // Ignore messages not in guild channels
     if (!message.guild || !message.channel) return;
+    
+    // Prevent duplicate processing of the same message
+    if (this.processedUserMessages.has(message.id)) {
+      logger.info(`Skipping already processed message ${message.id}`);
+      return;
+    }
+    
+    // Mark this message as being processed
+    this.processedUserMessages.add(message.id);
 
     try {
       // Check if this is a ticket channel

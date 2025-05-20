@@ -195,15 +195,21 @@ class GeminiAPI {
         response = result.response.text();
         logger.info("Successfully got response using structured message format");
       } catch (structuredError) {
-        // If fails, fall back to string format
-        logger.warn(`Error with structured format: ${structuredError.message}. Trying string format...`);
-        try {
-          const fallbackResult = await chat.sendMessage(userMessage);
-          response = fallbackResult.response.text();
-          logger.info("Successfully got response using string format fallback");
-        } catch (stringError) {
-          logger.error(`Both message formats failed. String error: ${stringError.message}`);
-          throw new Error(`Failed to get AI response: ${structuredError.message}, ${stringError.message}`);
+        // IMPORTANT: Only try string format if structured format actually failed
+        if (structuredError) {
+          logger.warn(`Error with structured format: ${structuredError.message}. Trying string format...`);
+          try {
+            const fallbackResult = await chat.sendMessage(userMessage);
+            response = fallbackResult.response.text();
+            logger.info("Successfully got response using string format fallback");
+          } catch (stringError) {
+            logger.error(`Both message formats failed. String error: ${stringError.message}`);
+            throw new Error(`Failed to get AI response: ${structuredError.message}, ${stringError.message}`);
+          }
+        } else {
+          // This should never happen, but just in case
+          logger.error("Structured format failed without an error");
+          throw new Error("Failed to get AI response: Unknown error with structured format");
         }
       }
 
