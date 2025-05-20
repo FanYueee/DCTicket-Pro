@@ -2,6 +2,8 @@ const database = require('../../core/database');
 const logger = require('../../core/logger');
 const config = require('../../core/config');
 const moment = require('moment-timezone');
+const fs = require('fs');
+const path = require('path');
 
 class AIRepository {
   /**
@@ -13,6 +15,13 @@ class AIRepository {
     try {
       let prompt;
       
+      // First try to get prompt from file
+      const filePrompt = await this.getPromptFromFile(departmentId);
+      if (filePrompt) {
+        return filePrompt;
+      }
+      
+      // If no file found, try database
       if (departmentId) {
         // Try to get department-specific prompt
         prompt = await database.get(
@@ -39,8 +48,50 @@ class AIRepository {
         updatedAt: new Date(prompt.updated_at)
       };
     } catch (error) {
-      logger.error(`Database error getting AI prompt: ${error.message}`);
+      logger.error(`Error getting AI prompt: ${error.message}`);
       throw error;
+    }
+  }
+
+  /**
+   * Get a prompt from file system
+   * @param {string} departmentId - The department ID or null for default
+   * @returns {Promise<Object>} The prompt object
+   */
+  async getPromptFromFile(departmentId = null) {
+    try {
+      // Determine file path based on department or use default
+      let filePath;
+      
+      if (departmentId) {
+        filePath = path.join(process.cwd(), 'src', 'modules', 'ai', 'prompts', departmentId, 'prompt.txt');
+      } else {
+        filePath = path.join(process.cwd(), 'src', 'modules', 'ai', 'prompts', 'default.txt');
+      }
+      
+      // Check if file exists
+      if (!fs.existsSync(filePath)) {
+        return null;
+      }
+      
+      // Read file content
+      const promptText = fs.readFileSync(filePath, 'utf8');
+      
+      // Get file stats for timestamp
+      const stats = fs.statSync(filePath);
+      
+      return {
+        id: 'file',
+        departmentId: departmentId,
+        promptText: promptText,
+        isDefault: !departmentId,
+        createdAt: stats.birthtime,
+        updatedAt: stats.mtime,
+        source: 'file'
+      };
+    } catch (error) {
+      logger.warn(`Failed to read prompt from file: ${error.message}`);
+      return null;
     }
   }
 
@@ -79,6 +130,43 @@ class AIRepository {
       return true;
     } catch (error) {
       logger.error(`Database error saving AI prompt: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Save a prompt to file system
+   * @param {string} departmentId - The department ID or null for default
+   * @param {string} promptText - The prompt text
+   * @returns {Promise<boolean>} Success status
+   */
+  async savePromptToFile(departmentId, promptText) {
+    try {
+      // Determine file path based on department or use default
+      let filePath;
+      let dirPath;
+      
+      if (departmentId) {
+        dirPath = path.join(process.cwd(), 'src', 'modules', 'ai', 'prompts', departmentId);
+        filePath = path.join(dirPath, 'prompt.txt');
+      } else {
+        dirPath = path.join(process.cwd(), 'src', 'modules', 'ai', 'prompts');
+        filePath = path.join(dirPath, 'default.txt');
+      }
+      
+      // Create directory if it doesn't exist
+      if (!fs.existsSync(dirPath)) {
+        fs.mkdirSync(dirPath, { recursive: true });
+      }
+      
+      // Write file
+      fs.writeFileSync(filePath, promptText, 'utf8');
+      
+      logger.info(`Saved prompt to file: ${filePath}`);
+      
+      return true;
+    } catch (error) {
+      logger.error(`Error saving prompt to file: ${error.message}`);
       throw error;
     }
   }

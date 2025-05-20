@@ -4,6 +4,7 @@ const config = require('../../core/config');
 const gemini = require('./gemini');
 const ConversationContext = require('./context');
 const aiLogger = require('./ai-logger');
+const moment = require('moment-timezone');
 
 // Import service-hours module if available
 let serviceHoursModule;
@@ -122,6 +123,21 @@ class AIService {
       return await this.repository.saveAIPrompt(departmentId, promptText);
     } catch (error) {
       logger.error(`Error updating AI prompt: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Save a prompt to a file
+   * @param {string} departmentId - The department ID or null for default
+   * @param {string} promptText - The prompt text
+   * @returns {Promise<boolean>} Success status
+   */
+  async savePromptToFile(departmentId, promptText) {
+    try {
+      return await this.repository.savePromptToFile(departmentId, promptText);
+    } catch (error) {
+      logger.error(`Error saving prompt to file: ${error.message}`);
       return false;
     }
   }
