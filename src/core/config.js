@@ -18,7 +18,7 @@ module.exports = {
     {
       id: 'general',
       name: '一般服務',
-      description: '一般問題和查詢',
+      description: '一般問題、售前諮詢、客製化需求',
       emoji: '❓',
       color: '#5865F2',
       categoryId: null
@@ -26,7 +26,7 @@ module.exports = {
     {
       id: 'billing',
       name: '帳務服務',
-      description: '帳單和付款問題',
+      description: '帳務相關問題、付款問題、升降級方案',
       emoji: '💰',
       color: '#57F287',
       categoryId: null
@@ -34,7 +34,7 @@ module.exports = {
     {
       id: 'tech',
       name: '技術服務',
-      description: '產品支援和技術問題',
+      description: '連線問題、主機障礙、基本伺服器技術支援',
       emoji: '🔧',
       color: '#ED4245',
       categoryId: null

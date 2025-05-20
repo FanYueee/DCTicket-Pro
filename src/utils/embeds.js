@@ -20,8 +20,13 @@ class Embeds {
         ...config.departments.map(dept => ({
           name: `${dept.emoji} ${dept.name}`,
           value: dept.description,
-          inline: true
-        }))
+          inline: false
+        })),
+        {
+          name: '⚠️注意事項',
+          value: '📚 在開啟客服單之前不妨看看我們的「文檔」',
+          inline: false
+        }
       )
       .setFooter({ text: '點擊下方按鈕創建對應部門的客服單' })
       .setTimestamp();
