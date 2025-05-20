@@ -1,6 +1,7 @@
 const database = require('../../core/database');
 const logger = require('../../core/logger');
 const config = require('../../core/config');
+const moment = require('moment-timezone');
 
 class AIRepository {
   /**
@@ -52,7 +53,7 @@ class AIRepository {
   async saveAIPrompt(departmentId, promptText) {
     try {
       const isDefault = !departmentId;
-      const now = new Date().toISOString();
+      const now = moment().tz(config.timezone || 'UTC').toISOString();
       
       // Check if prompt already exists
       const existingPrompt = await this.getAIPrompt(departmentId);
@@ -115,7 +116,7 @@ class AIRepository {
    */
   async saveAIContext(ticketId, context) {
     try {
-      const now = new Date().toISOString();
+      const now = moment().tz(config.timezone || 'UTC').toISOString();
       
       // Check if context already exists
       const existingContext = await this.getAIContext(ticketId);
@@ -151,7 +152,7 @@ class AIRepository {
     try {
       await database.run(
         'UPDATE tickets SET ai_handled = ?, updated_at = ? WHERE id = ?',
-        [aiHandled ? 1 : 0, new Date().toISOString(), ticketId]
+        [aiHandled ? 1 : 0, moment().tz(config.timezone || 'UTC').toISOString(), ticketId]
       );
       return true;
     } catch (error) {
@@ -170,7 +171,7 @@ class AIRepository {
     try {
       await database.run(
         'UPDATE tickets SET human_handled = ?, staff_id = ?, updated_at = ? WHERE id = ?',
-        [1, staffId, new Date().toISOString(), ticketId]
+        [1, staffId, moment().tz(config.timezone || 'UTC').toISOString(), ticketId]
       );
       return true;
     } catch (error) {
@@ -189,7 +190,7 @@ class AIRepository {
     try {
       await database.run(
         'UPDATE tickets SET status = ?, updated_at = ? WHERE id = ?',
-        [status, new Date().toISOString(), ticketId]
+        [status, moment().tz(config.timezone || 'UTC').toISOString(), ticketId]
       );
       return true;
     } catch (error) {

@@ -1,4 +1,6 @@
 const logger = require('../../core/logger');
+const config = require('../../core/config');
+const moment = require('moment-timezone');
 
 class ConversationContext {
   constructor(repository) {
@@ -31,7 +33,7 @@ class ConversationContext {
             content: systemPrompt,
             isUser: false,
             isSystemPrompt: true,
-            timestamp: new Date().toISOString()
+            timestamp: moment().tz(config.timezone || 'UTC').toISOString()
           });
 
           logger.info(`Added system prompt for department ${departmentId} to conversation context`);
@@ -45,7 +47,7 @@ class ConversationContext {
         messages.push({
           content: description,
           isUser: true,
-          timestamp: new Date().toISOString()
+          timestamp: moment().tz(config.timezone || 'UTC').toISOString()
         });
       }
 
@@ -97,7 +99,7 @@ class ConversationContext {
       context.messages.push({
         content,
         isUser,
-        timestamp: new Date().toISOString()
+        timestamp: moment().tz(config.timezone || 'UTC').toISOString()
       });
       
       // Keep only the last 10 messages to manage context size

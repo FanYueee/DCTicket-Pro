@@ -1,5 +1,6 @@
 const { EmbedBuilder, ButtonBuilder, ActionRowBuilder, ButtonStyle } = require('discord.js');
 const config = require('../core/config');
+const moment = require('moment-timezone');
 
 /**
  * Utility class for creating Discord embeds and components
@@ -29,7 +30,7 @@ class Embeds {
         }
       )
       .setFooter({ text: '點擊下方按鈕創建對應部門的客服單' })
-      .setTimestamp();
+      .setTimestamp(moment().tz(config.timezone || 'UTC').toDate());
   }
 
   /**
@@ -82,12 +83,12 @@ class Embeds {
       .addFields(
         { name: '用戶', value: userTag, inline: true },
         { name: '部門', value: `${department.emoji} ${department.name}`, inline: true },
-        { name: '創建時間', value: new Date(ticket.createdAt).toLocaleString(), inline: true },
+        { name: '創建時間', value: moment(ticket.createdAt).tz(config.timezone || 'UTC').format('YYYY-MM-DD HH:mm:ss'), inline: true },
         { name: '問題描述', value: ticket.description || '無描述' },
         { name: '狀態', value: `${statusConfig.emoji} ${statusConfig.name}`, inline: true }
       )
       .setFooter({ text: '請在此頻道中描述您的問題，我們會盡快回覆' })
-      .setTimestamp();
+      .setTimestamp(moment().tz(config.timezone || 'UTC').toDate());
   }
 
   /**
@@ -131,7 +132,7 @@ class Embeds {
       .setDescription(description)
       .setColor('#FEE75C')
       .setFooter({ text: '請點擊下方按鈕確認或取消' })
-      .setTimestamp();
+      .setTimestamp(moment().tz(config.timezone || 'UTC').toDate());
   }
 
   /**
@@ -164,7 +165,7 @@ class Embeds {
       .setTitle(title)
       .setDescription(description)
       .setColor('#ED4245')
-      .setTimestamp();
+      .setTimestamp(moment().tz(config.timezone || 'UTC').toDate());
   }
 
   /**
@@ -178,7 +179,7 @@ class Embeds {
       .setTitle(title)
       .setDescription(description)
       .setColor('#57F287')
-      .setTimestamp();
+      .setTimestamp(moment().tz(config.timezone || 'UTC').toDate());
   }
 }
 

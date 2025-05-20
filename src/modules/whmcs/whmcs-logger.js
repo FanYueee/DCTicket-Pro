@@ -1,6 +1,8 @@
 const winston = require('winston');
 const path = require('path');
 const fs = require('fs');
+const moment = require('moment-timezone');
+const config = require('../../core/config');
 
 // Create logs directory if it doesn't exist
 const logsDir = path.join(process.cwd(), 'logs');
@@ -19,7 +21,10 @@ const whmcsLogger = winston.createLogger({
   level: 'debug',
   format: winston.format.combine(
     winston.format.timestamp({
-      format: 'YYYY-MM-DD HH:mm:ss'
+      format: () => {
+        // Use the configured timezone for timestamps
+        return moment().tz(config.timezone || 'UTC').format('YYYY-MM-DD HH:mm:ss');
+      }
     }),
     winston.format.printf(info => `${info.timestamp} ${info.level}: ${info.message}`)
   ),

@@ -186,16 +186,20 @@ class Bot {
       logger.error(error.stack);
 
       // Reply to the user if possible
-      if (interaction.replied || interaction.deferred) {
-        await interaction.followUp({
-          content: 'There was an error processing your request.',
-          ephemeral: true
-        }).catch(err => logger.error(`Could not send followUp: ${err.message}`));
-      } else {
-        await interaction.reply({
-          content: 'There was an error processing your request.',
-          ephemeral: true
-        }).catch(err => logger.error(`Could not reply to interaction: ${err.message}`));
+      try {
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp({
+            content: '處理您的請求時發生錯誤。',
+            ephemeral: true
+          });
+        } else {
+          await interaction.reply({
+            content: '處理您的請求時發生錯誤。',
+            ephemeral: true
+          });
+        }
+      } catch (replyError) {
+        logger.error(`Could not respond to interaction: ${replyError.message}`);
       }
     }
   }

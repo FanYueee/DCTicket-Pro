@@ -5,6 +5,7 @@ module.exports = {
   token: process.env.BOT_TOKEN,
   clientId: process.env.CLIENT_ID,
   guildId: process.env.GUILD_ID,
+  timezone: process.env.TIMEZONE || 'Asia/Taipei',
 
   // Database Configuration
   dbPath: process.env.DB_PATH || './data/ticket.db',
@@ -82,7 +83,6 @@ module.exports = {
   // Service Hours Configuration
   serviceHours: {
     enabled: true,
-    timezone: 'Asia/Taipei', // Taipei timezone
     workdays: [1, 2, 3, 4, 5], // Monday to Friday (0 is Sunday, 6 is Saturday)
     workHoursStart: 9, // 9 AM
     workHoursEnd: 18, // 6 PM

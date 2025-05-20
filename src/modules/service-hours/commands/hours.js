@@ -2,6 +2,7 @@ const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('disc
 const logger = require('../../../core/logger');
 const config = require('../../../core/config');
 const nodeCron = require('node-cron');
+const moment = require('moment-timezone');
 
 // Get the repository and service from the parent module
 let repository;
@@ -118,7 +119,7 @@ async function handleViewHours(interaction, repository) {
       .setColor(settings.enabled ? '#57F287' : '#ED4245')
       .setDescription(`狀態: ${settings.enabled ? '已啟用 ✅' : '已停用 ❌'}\n\n${settings.enabled ? '在工作時間外，AI 將回應用戶並通知用戶下個工作日會有人工回應' : '時間限制已停用，可隨時請求人工客服'}`)
       .setFooter({ text: '使用 /hours add 新增時段，/hours del <ID> 刪除時段' })
-      .setTimestamp();
+      .setTimestamp(moment().tz(config.timezone || 'UTC').toDate());
     
     if (serviceHours.length === 0) {
       embed.addFields({ name: '工作時間', value: '尚未設定工作時間' });

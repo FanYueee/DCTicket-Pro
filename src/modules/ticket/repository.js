@@ -3,6 +3,7 @@ const logger = require('../../core/logger');
 const config = require('../../core/config');
 const fs = require('fs');
 const path = require('path');
+const moment = require('moment-timezone');
 
 class TicketRepository {
   async initialize() {
@@ -263,7 +264,7 @@ class TicketRepository {
     try {
       await database.run(
         'UPDATE tickets SET status = "closed", closed_at = ?, updated_at = ? WHERE id = ?',
-        [new Date().toISOString(), new Date().toISOString(), ticketId]
+        [moment().tz(config.timezone || 'UTC').toISOString(), moment().tz(config.timezone || 'UTC').toISOString(), ticketId]
       );
       return true;
     } catch (error) {
@@ -282,7 +283,7 @@ class TicketRepository {
     try {
       await database.run(
         'UPDATE tickets SET status = ?, updated_at = ? WHERE id = ?',
-        [status, new Date().toISOString(), ticketId]
+        [status, moment().tz(config.timezone || 'UTC').toISOString(), ticketId]
       );
       return true;
     } catch (error) {
@@ -301,7 +302,7 @@ class TicketRepository {
     try {
       await database.run(
         'UPDATE tickets SET ai_handled = ?, updated_at = ? WHERE id = ?',
-        [aiHandled ? 1 : 0, new Date().toISOString(), ticketId]
+        [aiHandled ? 1 : 0, moment().tz(config.timezone || 'UTC').toISOString(), ticketId]
       );
       return true;
     } catch (error) {
@@ -320,7 +321,7 @@ class TicketRepository {
     try {
       await database.run(
         'UPDATE tickets SET human_handled = ?, staff_id = ?, updated_at = ? WHERE id = ?',
-        [1, staffId, new Date().toISOString(), ticketId]
+        [1, staffId, moment().tz(config.timezone || 'UTC').toISOString(), ticketId]
       );
       return true;
     } catch (error) {

@@ -135,7 +135,9 @@ class AIService {
     try {
       // If service hours module is available, use it
       if (serviceHoursModule && serviceHoursModule.service) {
-        return await serviceHoursModule.service.isWithinServiceHours(guildId);
+        const result = await serviceHoursModule.service.isWithinServiceHours(guildId);
+        logger.debug(`Service hours check result: ${result}, guildId: ${guildId}, timezone: ${config.timezone}`);
+        return result;
       }
       
       // Otherwise, default to always within service hours
@@ -155,12 +157,22 @@ class AIService {
   getOffHoursMessage() {
     // If service hours module is available, use it
     if (serviceHoursModule && serviceHoursModule.service) {
-      return serviceHoursModule.service.getOffHoursMessage();
+      const message = serviceHoursModule.service.getOffHoursMessage();
+      logger.debug(`AI service got off-hours message: ${message}`);
+      return message;
     }
     
     // Otherwise, use default from config or fallback
-    return config.serviceHours?.offHoursMessage ||
+    const defaultMessage = config.serviceHours?.offHoursMessage ||
       '感謝您的來訊，我們目前非客服營業時間。您可以留下相關訊息，我們將會在下一個工作日盡速回覆您。';
+    
+    // Add timezone info to the default message
+    const timezone = config.timezone || 'Asia/Taipei';
+    const now = moment.tz(timezone);
+    const message = `${defaultMessage}\n\n當前時間: ${now.format('YYYY-MM-DD HH:mm:ss')} (${timezone})`;
+    
+    logger.debug(`AI service using default off-hours message: ${message}`);
+    return message;
   }
 
   /**
@@ -170,12 +182,22 @@ class AIService {
   getNewTicketOffHoursMessage() {
     // If service hours module is available, use it
     if (serviceHoursModule && serviceHoursModule.service) {
-      return serviceHoursModule.service.getNewTicketOffHoursMessage();
+      const message = serviceHoursModule.service.getNewTicketOffHoursMessage();
+      logger.debug(`AI service got new ticket off-hours message: ${message}`);
+      return message;
     }
     
     // Otherwise, use default from config or fallback
-    return config.serviceHours?.newTicketOffHoursMessage ||
+    const defaultMessage = config.serviceHours?.newTicketOffHoursMessage ||
       '目前非客服處理時間，您可以先善用 AI 客服協助處理您的問題，如果無法解決再請轉為專人客服，我們會在下一個工作日盡速為您服務。';
+    
+    // Add timezone info to the default message
+    const timezone = config.timezone || 'Asia/Taipei';
+    const now = moment.tz(timezone);
+    const message = `${defaultMessage}\n\n當前時間: ${now.format('YYYY-MM-DD HH:mm:ss')} (${timezone})`;
+    
+    logger.debug(`AI service using default new ticket off-hours message: ${message}`);
+    return message;
   }
 }
 

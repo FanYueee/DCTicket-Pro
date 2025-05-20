@@ -1,6 +1,14 @@
 const Bot = require('./core/bot');
 const logger = require('./core/logger');
+const config = require('./core/config');
+const moment = require('moment-timezone');
 const { registerCommands } = require('./deploy-commands');
+
+// Set default timezone for the entire process
+process.env.TZ = config.timezone || 'Asia/Taipei';
+// Force moment to use the configured timezone
+moment.tz.setDefault(config.timezone || 'Asia/Taipei');
+logger.info(`Setting system timezone to: ${process.env.TZ}`);
 
 // Handle process termination gracefully
 process.on('SIGINT', handleShutdown);

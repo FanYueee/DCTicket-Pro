@@ -5,6 +5,7 @@ const config = require('../../core/config');
 const Embeds = require('../../utils/embeds');
 const Permissions = require('../../utils/permissions');
 const { service: aiService } = require('../ai');
+const moment = require('moment-timezone');
 
 class TicketController {
   constructor(ticketService) {
@@ -157,10 +158,18 @@ class TicketController {
       await interaction.showModal(modal);
     } catch (error) {
       logger.error(`Error starting ticket creation: ${error.message}`);
-      await interaction.reply({
-        content: '創建客服單時出錯。請稍後再試。',
-        ephemeral: true
-      });
+      
+      // Check if we can respond to this interaction
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({
+            content: '創建客服單時出錯。請稍後再試。',
+            ephemeral: true
+          });
+        }
+      } catch (replyError) {
+        logger.error(`Failed to reply to interaction: ${replyError.message}`);
+      }
     }
   }
 
@@ -300,7 +309,7 @@ class TicketController {
         userId: user.id,
         departmentId: departmentId,
         status: initialStatus,
-        createdAt: new Date()
+        createdAt: moment().tz(config.timezone || 'Asia/Taipei').toDate()
       };
 
       await this.ticketService.createTicket(ticket);
@@ -321,7 +330,7 @@ class TicketController {
         departmentId: departmentId,
         description: description, // Use the original description value
         status: initialStatus,
-        createdAt: new Date()
+        createdAt: moment().tz(config.timezone || 'Asia/Taipei').toDate()
       }, user.tag);
 
       // Check if AI is enabled to determine whether to show handoff button
@@ -352,6 +361,7 @@ class TicketController {
 
           // Check if we're within service hours when creating ticket
           const isWithinHours = await aiService.isWithinServiceHours(guild.id);
+          logger.debug(`Service hours check for ticket creation: within hours=${isWithinHours}, timezone=${config.timezone}`);
 
           // If outside service hours, send the new ticket off-hours message
           if (!isWithinHours) {
@@ -366,10 +376,10 @@ class TicketController {
               username: guild.members.me.user.tag,
               content: JSON.stringify({
                 isNewTicketOffHoursNotice: true,
-                timestamp: new Date().toISOString(),
+                timestamp: moment().tz(config.timezone || 'Asia/Taipei').toISOString(),
                 message: newTicketOffHoursMessage
               }),
-              timestamp: new Date()
+              timestamp: moment().tz(config.timezone || 'Asia/Taipei').toDate()
             });
           }
 
@@ -439,10 +449,18 @@ class TicketController {
       });
     } catch (error) {
       logger.error(`Error closing ticket: ${error.message}`);
-      await interaction.reply({
-        content: '關閉客服單時出錯。請稍後再試。',
-        ephemeral: true
-      });
+      
+      // Check if we can respond to this interaction
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({
+            content: '關閉客服單時出錯。請稍後再試。',
+            ephemeral: true
+          });
+        }
+      } catch (replyError) {
+        logger.error(`Failed to reply to interaction: ${replyError.message}`);
+      }
     }
   }
 
@@ -637,10 +655,10 @@ class TicketController {
           username: interaction.client.user.tag,
           content: JSON.stringify({
             isOffHoursNotice: true,
-            timestamp: new Date().toISOString(),
+            timestamp: moment().tz(config.timezone || 'Asia/Taipei').toISOString(),
             message: offHoursMessage
           }),
-          timestamp: new Date()
+          timestamp: moment().tz(config.timezone || 'Asia/Taipei').toDate()
         });
       }
 
@@ -709,10 +727,18 @@ class TicketController {
       }
     } catch (error) {
       logger.error(`Error handling human handoff: ${error.message}`);
-      await interaction.reply({
-        content: `轉接人工客服時出錯: ${error.message}`,
-        ephemeral: true
-      });
+      
+      // Check if we can respond to this interaction
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({
+            content: '轉接人工客服時出錯。請稍後再試。',
+            ephemeral: true
+          });
+        }
+      } catch (replyError) {
+        logger.error(`Failed to reply to interaction: ${replyError.message}`);
+      }
     }
   }
 
@@ -863,14 +889,21 @@ class TicketController {
         // Check if we've sent an off-hours notice in the last hour
         const messages = await this.ticketService.getTicketMessages(ticket.id);
         let shouldSendOffHoursMessage = true;
-        const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000); // 1 hour cooldown
+        
+        // Use timezone-aware date calculation for the cooldown
+        const timezone = config.timezone || 'Asia/Taipei';
+        const now = moment().tz(timezone);
+        const oneHourAgo = now.clone().subtract(1, 'hour').toDate(); // 1 hour cooldown
+        
+        logger.debug(`Checking off-hours message cooldown. Current time: ${now.format('YYYY-MM-DD HH:mm:ss')} (${timezone}), Cooldown from: ${moment(oneHourAgo).format('YYYY-MM-DD HH:mm:ss')}`);
 
         // Check recent messages for off-hours notices
         for (const msg of messages) {
           try {
             const content = JSON.parse(msg.content);
             if (content.isOffHoursNotice) {
-              const noticeTime = new Date(content.timestamp);
+              // Parse timestamp with timezone awareness
+              const noticeTime = moment.tz(content.timestamp, config.timezone || 'Asia/Taipei').toDate();
               // If we sent a notice less than an hour ago, don't send another
               if (noticeTime > oneHourAgo) {
                 shouldSendOffHoursMessage = false;
@@ -894,10 +927,10 @@ class TicketController {
             username: message.client.user.tag,
             content: JSON.stringify({
               isOffHoursNotice: true,
-              timestamp: new Date().toISOString(),
+              timestamp: moment().tz(config.timezone || 'Asia/Taipei').toISOString(),
               message: offHoursMessage
             }),
-            timestamp: new Date()
+            timestamp: moment().tz(config.timezone || 'Asia/Taipei').toDate()
           });
 
           // Send the message

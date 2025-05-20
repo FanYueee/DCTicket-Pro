@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const config = require('../../core/config');
 const logger = require('../../core/logger');
+const moment = require('moment-timezone');
 
 class AILogger {
   constructor() {
@@ -27,8 +28,8 @@ class AILogger {
    * @returns {string} The log filename
    */
   getLogFilename() {
-    const now = new Date();
-    const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD
+    const now = moment().tz(config.timezone || 'UTC');
+    const dateStr = now.format('YYYY-MM-DD');
     return path.join(this.logDir, `ai-log-${dateStr}.json`);
   }
 
@@ -39,7 +40,7 @@ class AILogger {
   logInteraction(data) {
     try {
       const logFile = this.getLogFilename();
-      const timestamp = new Date().toISOString();
+      const timestamp = moment().tz(config.timezone || 'UTC').toISOString();
       
       // Add timestamp to the log entry
       const logEntry = {

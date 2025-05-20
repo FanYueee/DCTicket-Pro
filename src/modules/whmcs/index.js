@@ -4,6 +4,7 @@ const path = require('path');
 const logger = require('../../core/logger');
 const whmcsLogger = require('./whmcs-logger');
 const config = require('../../core/config');
+const moment = require('moment-timezone');
 const WHMCSService = require('./service');
 const WHMCSRepository = require('./repository');
 const TicketIntegration = require('./ticketIntegration');
@@ -112,7 +113,9 @@ class WHMCSModule {
         
         // Override the createTicket method to add WHMCS services
         ticketModule.controller.createTicket = async function(interaction, departmentId, description) {
-          whmcsLogger.debug(`Intercepted ticket creation for user ${interaction.user.id} in department ${departmentId}`);
+          const now = moment().tz(config.timezone || 'UTC');
+          whmcsLogger.debug(`Intercepted ticket creation for user ${interaction.user.id} in department ${departmentId} at ${now.format('YYYY-MM-DD HH:mm:ss')}`);
+          logger.debug(`Intercepted ticket creation for user ${interaction.user.id} in department ${departmentId}`);
           
           // Call the original method
           await originalCreateTicket.call(this, interaction, departmentId, description);

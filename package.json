@@ -1,6 +1,6 @@
 {
   "name": "DCTicket-Pro",
-  "version": "2.4",
+  "version": "2.6",
   "description": "Discord Ticket Bot with modular architecture",
   "main": "src/index.js",
   "scripts": {
@@ -23,6 +23,7 @@
     "cron-parser": "^4.9.0",
     "discord.js": "^14.14.1",
     "dotenv": "^16.4.1",
+    "moment-timezone": "^0.5.48",
     "node-cron": "^3.0.3",
     "sqlite3": "^5.1.7",
     "uuid": "^9.0.1",
