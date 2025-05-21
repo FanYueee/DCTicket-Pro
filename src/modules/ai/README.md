@@ -10,6 +10,7 @@ This module integrates the DCTicket bot with AI services, providing automated cu
 - File-based prompt management for complex prompts
 - Conversation context tracking for coherent multi-turn interactions
 - Support for service hours integration
+- Multimodal capabilities: analyze text, images, and files
 
 ## Components
 
@@ -34,6 +35,12 @@ This module integrates the DCTicket bot with AI services, providing automated cu
   - Provides insights into AI decisions
   - Performs sentiment analysis
   - Extracts key topics and themes
+  
+- Context Menu Commands:
+  - `AI 分析` - Right-click on any message to analyze its content
+    - Works with text messages
+    - Supports image analysis (multimodal capabilities)
+    - Can process text files for code and document analysis
 
 ### Prompt Management
 
@@ -75,7 +82,7 @@ ai: {
   },
 
   // AI model configurations
-  model: 'gemini-2.0-flash',
+  model: 'gemini-2.0-flash',  // supports multimodal (text+images)
   temperature: 0.7,
   maxOutputTokens: 1024
 }
@@ -146,6 +153,8 @@ When enabled, the module will automatically provide AI responses in ticket chann
 - AI is disabled for tickets in "waitingStaff" status
 - AI handles message processing asynchronously to prevent blocking
 - AI interactions are fully logged for audit purposes
+- Images are processed locally and only base64-encoded data is sent to AI API
+- Temporary image files are automatically deleted after processing
 
 ## Customization
 

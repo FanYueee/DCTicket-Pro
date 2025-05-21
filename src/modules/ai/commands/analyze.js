@@ -49,19 +49,6 @@ module.exports = {
         }
       }
 
-      // Prepare content for analysis
-      let analysisContent = content;
-      if (fileAttached && fileContent) {
-        analysisContent = content ? `${content}\n\n文件內容：\n${fileContent}` : fileContent;
-      }
-
-      if (!analysisContent.trim()) {
-        await interaction.editReply({
-          content: '無法分析空白訊息，請確保訊息包含文字或有效的文字檔案附件。'
-        });
-        return;
-      }
-
       // Initialize Gemini if not already initialized
       if (!gemini.isInitialized()) {
         await gemini.initialize();
@@ -79,16 +66,99 @@ module.exports = {
       // Send to AI for analysis (without context/history)
       logger.info(`Sending message for AI analysis, ID: ${analysisId}`);
       
-      // Log the content being analyzed
-      aiLogger.logUserMessage(analysisId, null, analysisContent);
-
-      // Format for a single message analysis - no chat history, just a direct request
-      const userMessage = `${module.exports.analysisPrompt}\n\n${analysisContent}`;
+      // Prepare chat history based on content type
+      let chatHistory;
+      let analysisContent;
       
-      const chatHistory = [{
-        role: 'user',
-        parts: userMessage
-      }];
+      // Check if we have an image attachment
+      const isImageAttachment = message.attachments.size > 0 && 
+        getFileType(message.attachments.first()) === 'image';
+      
+      if (isImageAttachment) {
+        // Get the first attachment (should be an image)
+        const attachment = message.attachments.first();
+        
+        // We need to download the image and convert it to base64
+        const tempDir = os.tmpdir();
+        const fileExtension = path.extname(attachment.name) || '.jpg';
+        const tempFilePath = path.join(tempDir, `attachment-${Date.now()}${fileExtension}`);
+        
+        try {
+          // Download the image
+          await downloadFile(attachment.url, tempFilePath);
+          
+          // Read the image file as binary data
+          const imageBuffer = fs.readFileSync(tempFilePath);
+          
+          // Convert to base64
+          const base64Image = imageBuffer.toString('base64');
+          
+          // Create the content for logging
+          analysisContent = content ? 
+            `${content}\n\n[附加圖片: ${attachment.name}]` : 
+            `[附加圖片: ${attachment.name}]`;
+          
+          // Log the content being analyzed (we can't log binary image data)
+          aiLogger.logUserMessage(analysisId, null, analysisContent || '(image analysis)');
+          
+          // Create a multimodal chat history with text and image parts
+          chatHistory = [{
+            role: 'user',
+            parts: [
+              { text: module.exports.analysisPrompt + (content ? `\n\n${content}` : '') },
+              { 
+                inlineData: {
+                  mimeType: attachment.contentType || 'image/jpeg',
+                  data: base64Image
+                }
+              }
+            ]
+          }];
+          
+          // Clean up
+          if (fs.existsSync(tempFilePath)) {
+            fs.unlinkSync(tempFilePath);
+          }
+          
+          logger.info(`Successfully processed image for AI analysis: ${attachment.name}`);
+        } catch (error) {
+          logger.error(`Error processing image for AI analysis: ${error.message}`);
+          
+          // Clean up on error
+          if (fs.existsSync(tempFilePath)) {
+            fs.unlinkSync(tempFilePath);
+          }
+          
+          await interaction.editReply({
+            content: '處理圖片時發生錯誤，請稍後再試。'
+          });
+          return;
+        }
+      } else {
+        // Handle text content as before
+        analysisContent = content;
+        if (fileAttached && fileContent) {
+          analysisContent = content ? `${content}\n\n文件內容：\n${fileContent}` : fileContent;
+        }
+
+        if (!analysisContent.trim()) {
+          await interaction.editReply({
+            content: '無法分析空白訊息，請確保訊息包含文字或有效的文字檔案附件。'
+          });
+          return;
+        }
+        
+        // Log the content being analyzed
+        aiLogger.logUserMessage(analysisId, null, analysisContent);
+
+        // Format for a single message analysis - no chat history, just a direct request
+        analysisContent = `${module.exports.analysisPrompt}\n\n${analysisContent}`;
+        
+        chatHistory = [{
+          role: 'user',
+          parts: analysisContent
+        }];
+      }
 
       // Generate response from Gemini without using context management
       const response = await gemini.generateResponse(
@@ -100,7 +170,7 @@ module.exports = {
       );
 
       // Log the AI response with the full prompt included
-      aiLogger.logResponse(analysisId, null, userMessage, response);
+      aiLogger.logResponse(analysisId, null, analysisContent || '(image analysis)', response);
 
       // Send the response to the user
       await interaction.editReply({
@@ -147,7 +217,7 @@ function getFileType(attachment) {
  * Process an attachment based on file type
  * @param {Object} attachment - The Discord attachment object
  * @param {string} fileType - The file type
- * @returns {Promise<string>} The processed content
+ * @returns {Promise<string|Object>} The processed content
  */
 async function processAttachment(attachment, fileType) {
   // If the file type is unsupported, throw an error
@@ -172,12 +242,11 @@ async function processAttachment(attachment, fileType) {
       content = fs.readFileSync(tempFilePath, 'utf8');
     } 
     else if (fileType === 'image') {
-      // For images, describe the image
+      // Note: We keep this for backward compatibility, but the main flow 
+      // now uses a more direct approach to process images with multimodal API
       content = `[圖片檔案] ${attachment.name}\n` +
                `類型: ${attachment.contentType || '未知'}\n` +
-               `大小: ${formatBytes(attachment.size)}\n` +
-               `URL: ${attachment.url}\n\n` +
-               `請針對此圖片內容提供分析或協助。`;
+               `大小: ${formatBytes(attachment.size)}`;
     }
     
     // Clean up

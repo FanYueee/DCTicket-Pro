@@ -58,7 +58,7 @@ class GeminiAPI {
 
   /**
    * Generate a response based on a chat history
-   * @param {Array<{role: string, parts: string}>} chatHistory - The chat history
+   * @param {Array<{role: string, parts: string|Array}>} chatHistory - The chat history (may include multimodal content)
    * @param {string} departmentId - Optional department ID for specialized prompt
    * @param {Object} repository - Optional repository for database operations
    * @returns {Promise<string>} The generated response
@@ -87,8 +87,13 @@ class GeminiAPI {
       // If no system prompt in context, get from database or config
       if (systemPrompt === config.ai.defaultPrompt) {
         try {
-          systemPrompt = await this.getDepartmentPrompt(departmentId, repository);
-          logger.info(`Using prompt for department ${departmentId || 'default'} from repository`);
+          // Only try to get department prompt if repository is provided
+          if (repository) {
+            systemPrompt = await this.getDepartmentPrompt(departmentId, repository);
+            logger.info(`Using prompt for department ${departmentId || 'default'} from repository`);
+          } else {
+            logger.info(`No repository provided, using default prompt`);
+          }
         } catch (error) {
           logger.warn(`Error getting department prompt: ${error.message}. Using default.`);
         }
@@ -113,10 +118,6 @@ class GeminiAPI {
         aiLogger.logChatContext(ticketId, departmentId, chatHistory, contextData);
       }
 
-      // CRITICAL FIX: Gemini's system instruction needs careful handling
-      // For Gemini 2.0, we need to ensure we're using the system instruction in a way
-      // that works consistently, as systemInstruction parameter may not be working properly
-
       // Create the base model without system instruction first
       const baseModel = this.genAI.getGenerativeModel({
         model: config.ai.model || 'gemini-2.0-flash',
@@ -126,9 +127,13 @@ class GeminiAPI {
         },
       });
 
-      // For debugging - log the type of each message in history
-      if (chatHistory.length > 0) {
-        logger.info(`Chat history roles: ${chatHistory.map(m => m.role).join(', ')}`);
+      // For debugging - check if this is a multimodal message (with image)
+      const hasMultimodalContent = chatHistory.some(msg => 
+        Array.isArray(msg.parts) && msg.parts.some(part => part.inlineData)
+      );
+      
+      if (hasMultimodalContent) {
+        logger.info('Detected multimodal content (image) in the chat history');
       }
 
       // Prepare history with system message FIRST
@@ -138,7 +143,7 @@ class GeminiAPI {
       // Note: Gemini uses "model" role for assistant messages
       fullHistory.push({
         role: "model",  // Using "model" role to represent the AI
-        parts: systemPrompt
+        parts: [{ text: systemPrompt }]
       });
 
       // Now add the real conversation history
@@ -155,62 +160,100 @@ class GeminiAPI {
         history: fullHistory,
       });
 
-      // Get the last message (should be from user)
-      let userMessage = '';
+      // For multimodal content, we need special handling
+      let userMessage;
+      let isMultimodal = false;
+      
       if (chatHistory.length > 0) {
         const lastMessage = chatHistory[chatHistory.length - 1];
-        if (lastMessage.role === 'user') {
-          userMessage = lastMessage.parts;
-        } else {
-          logger.warn(`Expected last message to be from user, but was from ${lastMessage.role}`);
-          // Try to find the last user message
-          for (let i = chatHistory.length - 1; i >= 0; i--) {
-            if (chatHistory[i].role === 'user') {
-              userMessage = chatHistory[i].parts;
-              break;
+        
+        // Check if the last message contains multimodal content
+        if (lastMessage.role === 'user' && Array.isArray(lastMessage.parts)) {
+          isMultimodal = lastMessage.parts.some(part => part.inlineData);
+          
+          if (isMultimodal) {
+            // For multimodal messages, extract text for logging
+            const textParts = lastMessage.parts
+              .filter(part => part.text)
+              .map(part => part.text);
+            
+            userMessage = textParts.join('\n');
+            logger.info('Processing multimodal message with image content');
+          }
+        }
+        
+        // If not multimodal or couldn't extract text, use standard approach
+        if (!isMultimodal) {
+          if (lastMessage.role === 'user') {
+            if (typeof lastMessage.parts === 'string') {
+              userMessage = lastMessage.parts;
+            } else if (Array.isArray(lastMessage.parts)) {
+              // Extract text from parts array
+              userMessage = lastMessage.parts
+                .map(part => (typeof part === 'string' ? part : part.text))
+                .filter(Boolean)
+                .join('\n');
+            }
+          } else {
+            logger.warn(`Expected last message to be from user, but was from ${lastMessage.role}`);
+            // Try to find the last user message
+            for (let i = chatHistory.length - 1; i >= 0; i--) {
+              if (chatHistory[i].role === 'user') {
+                if (typeof chatHistory[i].parts === 'string') {
+                  userMessage = chatHistory[i].parts;
+                } else if (Array.isArray(chatHistory[i].parts)) {
+                  userMessage = chatHistory[i].parts
+                    .map(part => (typeof part === 'string' ? part : part.text))
+                    .filter(Boolean)
+                    .join('\n');
+                }
+                break;
+              }
             }
           }
         }
       }
 
       // Log the user message that's being sent to the AI
-      if (ticketId) {
+      if (ticketId && userMessage) {
         aiLogger.logUserMessage(ticketId, departmentId, userMessage);
       }
 
-      // CRITICAL FIX: Get the response - using structured format for maximum compatibility
-      logger.info(`Sending user message to AI: "${userMessage.substring(0, 50)}${userMessage.length > 50 ? '...' : ''}"`);
-
-      const structuredMessage = {
-        role: "user",
-        parts: userMessage
-      };
-
-      logger.info(`Using structured message format: ${JSON.stringify(structuredMessage)}`);
-
+      // Get the response
       let response;
       try {
-        // First try with structured format
-        const result = await chat.sendMessage(structuredMessage);
-        response = result.response.text();
-        logger.info("Successfully got response using structured message format");
-      } catch (structuredError) {
-        // IMPORTANT: Only try string format if structured format actually failed
-        if (structuredError) {
-          logger.warn(`Error with structured format: ${structuredError.message}. Trying string format...`);
-          try {
-            const fallbackResult = await chat.sendMessage(userMessage);
-            response = fallbackResult.response.text();
-            logger.info("Successfully got response using string format fallback");
-          } catch (stringError) {
-            logger.error(`Both message formats failed. String error: ${stringError.message}`);
-            throw new Error(`Failed to get AI response: ${structuredError.message}, ${stringError.message}`);
-          }
+        let result;
+        
+        if (isMultimodal) {
+          // For multimodal messages, we need to send the last message directly
+          const lastMessage = chatHistory[chatHistory.length - 1];
+          logger.info('Sending multimodal message to AI (containing image)');
+          result = await chat.sendMessage(lastMessage.parts);
         } else {
-          // This should never happen, but just in case
-          logger.error("Structured format failed without an error");
-          throw new Error("Failed to get AI response: Unknown error with structured format");
+          // For text-only messages
+          const lastMessage = chatHistory[chatHistory.length - 1];
+          
+          if (typeof lastMessage.parts === 'string') {
+            // String format
+            logger.info(`Sending text message to AI: "${lastMessage.parts.substring(0, 50)}${lastMessage.parts.length > 50 ? '...' : ''}"`);
+            result = await chat.sendMessage(lastMessage.parts);
+          } else {
+            // Structured format
+            logger.info(`Sending structured message to AI`);
+            result = await chat.sendMessage(lastMessage.parts);
+          }
         }
+        
+        if (!result || !result.response) {
+          logger.error("Received empty response from Gemini API");
+          throw new Error("Empty response from Gemini API");
+        }
+        
+        response = result.response.text();
+        logger.info("Successfully got response from Gemini API");
+      } catch (error) {
+        logger.error(`Error getting AI response: ${error.message}`);
+        throw error;
       }
 
       // Log the result
@@ -218,7 +261,9 @@ class GeminiAPI {
 
       // Log the AI response
       if (ticketId) {
-        aiLogger.logResponse(ticketId, departmentId, userMessage, response);
+        // Make sure we have a valid userMessage before logging
+        const logMessage = userMessage || '(multimodal content - contains image)';
+        aiLogger.logResponse(ticketId, departmentId, logMessage, response);
       }
 
       return response;
@@ -243,7 +288,16 @@ class GeminiAPI {
     for (const message of conversationMessages) {
       // Determine if this is a user or assistant (bot) message
       const role = message.isUser ? 'user' : 'model';
+      
+      // Check if the message content contains image markers
+      const containsImageMarker = typeof message.content === 'string' && 
+        message.content.includes('[圖片檔案]');
+      
+      if (containsImageMarker) {
+        logger.warn('Found message with image marker, but image data is missing. This will be handled as text only.');
+      }
 
+      // For regular text messages
       history.push({
         role: role,
         parts: message.content
@@ -266,6 +320,18 @@ class GeminiAPI {
    */
   async getDepartmentPrompt(departmentId, repository) {
     try {
+      // Check if repository exists
+      if (!repository) {
+        logger.warn('Repository not provided for getDepartmentPrompt');
+        return config.ai.defaultPrompt;
+      }
+      
+      // Check if getAIPrompt function exists
+      if (typeof repository.getAIPrompt !== 'function') {
+        logger.warn('getAIPrompt function not found in repository');
+        return config.ai.defaultPrompt;
+      }
+      
       // Get prompt from database
       const prompt = await repository.getAIPrompt(departmentId);
 

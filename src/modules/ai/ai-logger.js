@@ -68,11 +68,16 @@ class AILogger {
    * @param {string} systemPrompt - The system prompt
    */
   logPrompt(ticketId, departmentId, systemPrompt) {
+    // Ensure we have valid values to log
+    const safeTicketId = ticketId || 'unknown';
+    const safeDepartmentId = departmentId || 'unknown';
+    const safeSystemPrompt = systemPrompt || '(default system prompt)';
+    
     this.logInteraction({
       interactionType: 'SYSTEM_PROMPT',
-      ticketId,
-      departmentId,
-      systemPrompt
+      ticketId: safeTicketId,
+      departmentId: safeDepartmentId,
+      systemPrompt: safeSystemPrompt
     });
   }
 
@@ -83,11 +88,16 @@ class AILogger {
    * @param {string} userMessage - The user message
    */
   logUserMessage(ticketId, departmentId, userMessage) {
+    // Ensure we have valid values to log
+    const safeTicketId = ticketId || 'unknown';
+    const safeDepartmentId = departmentId || 'unknown';
+    const safeUserMessage = userMessage || '(no content)';
+    
     this.logInteraction({
       interactionType: 'USER_MESSAGE',
-      ticketId,
-      departmentId,
-      userMessage
+      ticketId: safeTicketId,
+      departmentId: safeDepartmentId,
+      userMessage: safeUserMessage
     });
   }
 
@@ -99,12 +109,18 @@ class AILogger {
    * @param {string} aiResponse - The AI response
    */
   logResponse(ticketId, departmentId, userMessage, aiResponse) {
+    // Ensure we have valid values to log
+    const safeTicketId = ticketId || 'unknown';
+    const safeDepartmentId = departmentId || 'unknown';
+    const safeUserMessage = userMessage || '(no content)';
+    const safeAiResponse = aiResponse || '(no response)';
+    
     this.logInteraction({
       interactionType: 'AI_RESPONSE',
-      ticketId,
-      departmentId,
-      userMessage,
-      aiResponse
+      ticketId: safeTicketId,
+      departmentId: safeDepartmentId,
+      userMessage: safeUserMessage,
+      aiResponse: safeAiResponse
     });
   }
 
@@ -116,12 +132,18 @@ class AILogger {
    * @param {Object} contextData - The full context data
    */
   logChatContext(ticketId, departmentId, chatHistory, contextData) {
+    // Ensure we have valid values to log
+    const safeTicketId = ticketId || 'unknown';
+    const safeDepartmentId = departmentId || 'unknown';
+    const safeChatHistory = chatHistory || [];
+    const safeContextData = contextData || {};
+    
     this.logInteraction({
       interactionType: 'CHAT_CONTEXT',
-      ticketId,
-      departmentId,
-      chatHistory,
-      contextData
+      ticketId: safeTicketId,
+      departmentId: safeDepartmentId,
+      chatHistory: safeChatHistory,
+      contextData: safeContextData
     });
   }
 
@@ -133,12 +155,18 @@ class AILogger {
    * @param {string} context - Additional context
    */
   logError(ticketId, departmentId, errorMessage, context = '') {
+    // Ensure we have valid values to log
+    const safeTicketId = ticketId || 'unknown';
+    const safeDepartmentId = departmentId || 'unknown';
+    const safeErrorMessage = errorMessage || 'Unknown error';
+    const safeContext = context || '';
+    
     this.logInteraction({
       interactionType: 'ERROR',
-      ticketId,
-      departmentId,
-      errorMessage,
-      context
+      ticketId: safeTicketId,
+      departmentId: safeDepartmentId,
+      errorMessage: safeErrorMessage,
+      context: safeContext
     });
   }
 }
