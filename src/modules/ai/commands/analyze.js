@@ -172,10 +172,66 @@ module.exports = {
       // Log the AI response with the full prompt included
       aiLogger.logResponse(analysisId, null, analysisContent || '(image analysis)', response);
 
-      // Send the response to the user
-      await interaction.editReply({
-        content: response
-      });
+      // Check if response exceeds Discord's 2000 character limit
+      if (response.length > 2000) {
+        // Split the response into chunks that fit within Discord's limits (max 2000 chars)
+        const chunks = [];
+        let currentChunk = '';
+        const sentences = response.split(/(?<=[.!?])\s+/); // Split by sentence endings
+
+        for (const sentence of sentences) {
+          // If adding this sentence would exceed the limit, push current chunk and start a new one
+          if (currentChunk.length + sentence.length > 1900) { // 1900 to leave some margin
+            if (currentChunk.length > 0) {
+              chunks.push(currentChunk);
+              currentChunk = sentence;
+            } else {
+              // If a single sentence is longer than the limit, split it
+              const words = sentence.split(' ');
+              for (const word of words) {
+                if (currentChunk.length + word.length + 1 > 1900) {
+                  chunks.push(currentChunk);
+                  currentChunk = word + ' ';
+                } else {
+                  currentChunk += word + ' ';
+                }
+              }
+            }
+          } else {
+            currentChunk += sentence + ' ';
+          }
+        }
+
+        // Add any remaining content
+        if (currentChunk.length > 0) {
+          chunks.push(currentChunk);
+        }
+        
+        // Send the first chunk as the initial reply
+        await interaction.editReply({
+          content: chunks[0] + '\n\n(回應較長，持續展示中...)'
+        });
+        
+        // Send the rest as follow-up messages
+        for (let i = 1; i < chunks.length; i++) {
+          const isLast = i === chunks.length - 1;
+          const chunkPrefix = isLast ? '(最終部分)' : `(部分 ${i+1}/${chunks.length})`;
+          
+          try {
+            await interaction.followUp({
+              content: `${chunkPrefix}\n\n${chunks[i]}`,
+              ephemeral: false
+            });
+          } catch (error) {
+            logger.error(`Error sending message chunk: ${error.message}`);
+          }
+        }
+      } else {
+        // Send the response to the user (fits within Discord limit)
+        await interaction.editReply({
+          content: response
+        });
+      }
 
       logger.info(`AI analysis completed for ID: ${analysisId}`);
 
