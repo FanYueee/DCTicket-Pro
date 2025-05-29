@@ -368,7 +368,7 @@ class TicketController {
 
           // If outside service hours, send the new ticket off-hours message
           if (!isWithinHours) {
-            const newTicketOffHoursMessage = aiService.getNewTicketOffHoursMessage();
+            const newTicketOffHoursMessage = await aiService.getNewTicketOffHoursMessage(guild.id);
             await channel.send(newTicketOffHoursMessage);
 
             // Save the message to the database with a special tag
@@ -648,7 +648,7 @@ class TicketController {
       // But we'll send it AFTER the embed message
       let offHoursMessage = null;
       if (!isWithinHours) {
-        offHoursMessage = aiService.getOffHoursMessage();
+        offHoursMessage = await aiService.getOffHoursMessage(interaction.guild.id);
 
         // Save the off-hours message to the database with a special tag
         await this.ticketService.saveMessage({
@@ -929,7 +929,7 @@ class TicketController {
 
         // If we should send the off-hours notice
         if (shouldSendOffHoursMessage) {
-          const offHoursMessage = aiService.getOffHoursMessage();
+          const offHoursMessage = await aiService.getOffHoursMessage(message.guild.id);
 
           // Save the off-hours message with a timestamp
           await this.ticketService.saveMessage({

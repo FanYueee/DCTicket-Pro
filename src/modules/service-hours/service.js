@@ -52,23 +52,10 @@ class ServiceHoursService {
       logger.debug(`Checking service hours using time: ${momentNow.format('YYYY-MM-DD HH:mm:ss')} (${timezone})`);
       logger.debug(`Current day: ${currentDay}, Current hour: ${currentHour}`);
 
-      // First check using config values directly (more reliable)
-      if (config.serviceHours && config.serviceHours.workdays && config.serviceHours.workHoursStart && config.serviceHours.workHoursEnd) {
-        const workdays = config.serviceHours.workdays;
-        const startHour = config.serviceHours.workHoursStart;
-        const endHour = config.serviceHours.workHoursEnd;
-        
-        logger.debug(`Using config workdays=${workdays.join(',')}, startHour=${startHour}, endHour=${endHour}`);
-        
-        // Check if today is a workday and we're within working hours
-        if (workdays.includes(currentDay) && currentHour >= startHour && currentHour < endHour) {
-          logger.debug(`Within service hours using direct config check (${timezone}): day=${currentDay}, hour=${currentHour}`);
-          return true;
-        }
-      }
+      // First check cron expressions from database (higher priority)
+      logger.debug(`Checking cron expressions (found ${serviceHours.length})`);
       
-      // Fallback to cron expressions from database
-      logger.debug(`Direct config check failed, trying cron expressions (found ${serviceHours.length})`);
+      let foundMatchingCron = false;
       
       // Check if current time matches any of the cron expressions
       for (const schedule of serviceHours) {
@@ -81,22 +68,42 @@ class ServiceHoursService {
 
           // Check if the current time matches the cron pattern
           try {
-            // Create cron parser with timezone option
-            const interval = cronParser.parseExpression(schedule.cron_expression, {
-              currentDate: now,
-              tz: timezone
-            });
-            const prev = interval.prev();
-            const next = interval.next();
+            // Parse the cron expression
+            const cronParts = schedule.cron_expression.split(' ');
             
-            logger.debug(`Cron check: now=${momentNow.format('YYYY-MM-DD HH:mm:ss')}, prev=${moment(prev).format('YYYY-MM-DD HH:mm:ss')}, next=${moment(next).format('YYYY-MM-DD HH:mm:ss')}`);
-            logger.debug(`Time differences: next-now=${(next.getTime() - now.getTime())/1000}s, now-prev=${(now.getTime() - prev.getTime())/1000}s`);
+            // Check if this is a range-based expression (e.g., "10:05 * 8-9 * * *")
+            if (cronParts.length >= 3 && cronParts[2].includes('-')) {
+              // Extract hour range from the expression
+              const hourRange = cronParts[2];
+              const [startHour, endHour] = hourRange.split('-').map(h => parseInt(h));
+              
+              logger.debug(`Detected hour range: ${startHour}-${endHour}, current hour: ${currentHour}`);
+              
+              // Check if current hour is within the range
+              if (currentHour >= startHour && currentHour <= endHour) {
+                logger.debug(`Within service hours based on hour range: ${hourRange}`);
+                foundMatchingCron = true;
+                return true;
+              }
+            } else {
+              // For non-range expressions, use the original logic
+              const interval = cronParser.parseExpression(schedule.cron_expression, {
+                currentDate: now,
+                tz: timezone
+              });
+              const prev = interval.prev();
+              const next = interval.next();
+              
+              logger.debug(`Cron check: now=${momentNow.format('YYYY-MM-DD HH:mm:ss')}, prev=${moment(prev).format('YYYY-MM-DD HH:mm:ss')}, next=${moment(next).format('YYYY-MM-DD HH:mm:ss')}`);
+              logger.debug(`Time differences: next-now=${(next.getTime() - now.getTime())/1000}s, now-prev=${(now.getTime() - prev.getTime())/1000}s`);
 
-            // Check if we're within service hours using time comparison
-            // Uses a 1-minute window to check if we're close to a service hour match
-            if (next.getTime() - now.getTime() < 60000 || now.getTime() - prev.getTime() < 60000) {
-              logger.debug(`Service hour match found for pattern: ${schedule.cron_expression}, is within working hours`);
-              return true;
+              // Check if we're within service hours using time comparison
+              // Uses a 1-minute window to check if we're close to a service hour match
+              if (next.getTime() - now.getTime() < 60000 || now.getTime() - prev.getTime() < 60000) {
+                logger.debug(`Service hour match found for pattern: ${schedule.cron_expression}, is within working hours`);
+                foundMatchingCron = true;
+                return true;
+              }
             }
           } catch (parseError) {
             logger.warn(`Error parsing cron expression using parser: ${parseError.message}`);
@@ -105,6 +112,27 @@ class ServiceHoursService {
         } catch (cronError) {
           logger.warn(`Error parsing cron expression (${schedule.cron_expression}): ${cronError.message}`);
           continue;
+        }
+      }
+
+      // If we have cron expressions but none matched, we're outside service hours
+      if (serviceHours.length > 0 && !foundMatchingCron) {
+        logger.debug(`No matching cron expressions found, outside service hours`);
+        return false;
+      }
+
+      // If no cron expressions defined, fallback to config
+      if (serviceHours.length === 0 && config.serviceHours && config.serviceHours.workdays && config.serviceHours.workHoursStart && config.serviceHours.workHoursEnd) {
+        const workdays = config.serviceHours.workdays;
+        const startHour = config.serviceHours.workHoursStart;
+        const endHour = config.serviceHours.workHoursEnd;
+        
+        logger.debug(`No cron expressions, using config: workdays=${workdays.join(',')}, startHour=${startHour}, endHour=${endHour}`);
+        
+        // Check if today is a workday and we're within working hours
+        if (workdays.includes(currentDay) && currentHour >= startHour && currentHour < endHour) {
+          logger.debug(`Within service hours using config check (${timezone}): day=${currentDay}, hour=${currentHour}`);
+          return true;
         }
       }
 
@@ -118,10 +146,150 @@ class ServiceHoursService {
   }
 
   /**
+   * Get the next service time based on cronjobs and config
+   * @param {string} guildId - The guild ID
+   * @returns {Promise<Date>} The next service time
+   */
+  async getNextServiceTime(guildId) {
+    const timezone = config.timezone || 'Asia/Taipei';
+    const now = moment.tz(timezone);
+    let nextServiceTime = null;
+    
+    try {
+      // First check cronjobs from database
+      const hours = await this.repository.getAllHours(guildId);
+      
+      if (hours && hours.length > 0) {
+        logger.debug(`Checking ${hours.length} cron expressions for next service time`);
+        
+        // Find the nearest next service time from all cronjobs
+        for (const hour of hours) {
+          try {
+            const cronParts = hour.cron_expression.split(' ');
+            
+            // Special handling for hour range expressions (e.g., "* 8-9 * * *" or "* 11 * * *")
+            if (cronParts.length >= 3 && cronParts[0] === '*' && cronParts[1] !== '*') {
+              const hourPart = cronParts[1];
+              
+              if (hourPart.includes('-')) {
+                // Handle range like "8-9"
+                const [startHour, endHour] = hourPart.split('-').map(h => parseInt(h));
+                
+                // Check each hour in the range
+                for (let h = startHour; h <= endHour; h++) {
+                  const testTime = now.clone().hour(h).minute(0).second(0);
+                  if (testTime.isAfter(now)) {
+                    if (!nextServiceTime || testTime.toDate() < nextServiceTime) {
+                      nextServiceTime = testTime.toDate();
+                      logger.debug(`Found next service time from range ${hourPart}: ${testTime.format('YYYY-MM-DD HH:mm')}`);
+                    }
+                  }
+                }
+                
+                // If no time today works, try tomorrow
+                if (!nextServiceTime || nextServiceTime > now.clone().endOf('day').toDate()) {
+                  const tomorrow = now.clone().add(1, 'day').hour(startHour).minute(0).second(0);
+                  if (!nextServiceTime || tomorrow.toDate() < nextServiceTime) {
+                    nextServiceTime = tomorrow.toDate();
+                    logger.debug(`Found next service time from range ${hourPart} (tomorrow): ${tomorrow.format('YYYY-MM-DD HH:mm')}`);
+                  }
+                }
+              } else {
+                // Handle single hour like "11"
+                const targetHour = parseInt(hourPart);
+                const testTime = now.clone().hour(targetHour).minute(0).second(0);
+                
+                if (testTime.isAfter(now)) {
+                  // Today at target hour
+                  if (!nextServiceTime || testTime.toDate() < nextServiceTime) {
+                    nextServiceTime = testTime.toDate();
+                    logger.debug(`Found next service time at hour ${targetHour}: ${testTime.format('YYYY-MM-DD HH:mm')}`);
+                  }
+                } else {
+                  // Tomorrow at target hour
+                  const tomorrow = now.clone().add(1, 'day').hour(targetHour).minute(0).second(0);
+                  if (!nextServiceTime || tomorrow.toDate() < nextServiceTime) {
+                    nextServiceTime = tomorrow.toDate();
+                    logger.debug(`Found next service time at hour ${targetHour} (tomorrow): ${tomorrow.format('YYYY-MM-DD HH:mm')}`);
+                  }
+                }
+              }
+            } else {
+              // For other cron expressions, use the parser
+              const interval = cronParser.parseExpression(hour.cron_expression, {
+                currentDate: now.toDate(),
+                tz: timezone
+              });
+              const next = interval.next().toDate();
+              
+              if (!nextServiceTime || next < nextServiceTime) {
+                nextServiceTime = next;
+                logger.debug(`Found next service time from cron ${hour.cron_expression}: ${moment(next).format('YYYY-MM-DD HH:mm')}`);
+              }
+            }
+          } catch (error) {
+            logger.error(`Error parsing cron expression ${hour.cron_expression}: ${error.message}`);
+          }
+        }
+      }
+      
+      // If no cronjobs or all failed, fallback to config
+      if (!nextServiceTime) {
+        const workdays = config.serviceHours?.workdays || [1, 2, 3, 4, 5];
+        const startHour = config.serviceHours?.workHoursStart || 9;
+        const endHour = config.serviceHours?.workHoursEnd || 18;
+        
+        let checkDate = now.clone();
+        
+        // Check if today is a workday and we haven't passed the end time
+        if (workdays.includes(checkDate.day()) && checkDate.hour() < endHour) {
+          // If before start time, next service time is today at start time
+          if (checkDate.hour() < startHour) {
+            checkDate.hour(startHour).minute(0).second(0);
+            nextServiceTime = checkDate.toDate();
+          }
+          // If within service hours, we shouldn't be here (we're already in service hours)
+          // But just in case, set to tomorrow's start time
+          else {
+            checkDate.add(1, 'days');
+            while (!workdays.includes(checkDate.day())) {
+              checkDate.add(1, 'days');
+            }
+            checkDate.hour(startHour).minute(0).second(0);
+            nextServiceTime = checkDate.toDate();
+          }
+        } else {
+          // Not a workday or past end time, find next workday
+          if (workdays.includes(checkDate.day()) && checkDate.hour() >= endHour) {
+            // Past today's service hours, move to next day
+            checkDate.add(1, 'days');
+          }
+          
+          // Find next workday
+          let daysChecked = 0;
+          while (daysChecked < 7 && !workdays.includes(checkDate.day())) {
+            checkDate.add(1, 'days');
+            daysChecked++;
+          }
+          
+          checkDate.hour(startHour).minute(0).second(0);
+          nextServiceTime = checkDate.toDate();
+        }
+      }
+      
+      return nextServiceTime;
+    } catch (error) {
+      logger.error(`Error getting next service time: ${error.message}`);
+      // Fallback to tomorrow 9 AM
+      return now.clone().add(1, 'days').hour(9).minute(0).second(0).toDate();
+    }
+  }
+
+  /**
    * Get the off-hours message with timezone information
    * @returns {string} The off-hours message
    */
-  getOffHoursMessage() {
+  async getOffHoursMessage(guildId) {
     // Ensure we're using the configured timezone
     const timezone = config.timezone || 'Asia/Taipei';
     
@@ -129,46 +297,26 @@ class ServiceHoursService {
     const now = moment.tz(timezone);
     logger.debug(`Current time in ${timezone}: ${now.format('YYYY-MM-DD HH:mm:ss')}`);
     
-    // Get working days and hours from config
-    const workdays = config.serviceHours?.workdays || [1, 2, 3, 4, 5]; // Monday-Friday by default
-    const startHour = config.serviceHours?.workHoursStart || 9;
+    // Get the next service time
+    const nextServiceTime = await this.getNextServiceTime(guildId);
     
-    // Find the next working day
-    let nextWorkDay = now.clone();
-    let daysChecked = 0;
-    
-    // Add at least one day since we're looking for the next working day
-    nextWorkDay.add(1, 'days');
-    
-    while (daysChecked < 7) { // Check up to 7 days ahead to find the next working day
-      if (workdays.includes(nextWorkDay.day())) {
-        break; // Found a working day
-      }
-      // If not a working day, move to the next day
-      nextWorkDay.add(1, 'days');
-      daysChecked++;
-    }
-    
-    // Set the time to the start hour
-    nextWorkDay.hour(startHour).minute(0).second(0);
-    
-    // Format the next working day
-    const nextWorkDayFormatted = nextWorkDay.format('YYYY-MM-DD HH:mm');
-    logger.debug(`Next working day in ${timezone}: ${nextWorkDayFormatted}`);
+    // Format the next service time
+    const nextServiceTimeFormatted = moment(nextServiceTime).tz(timezone).format('YYYY-MM-DD HH:mm');
+    logger.debug(`Next service time in ${timezone}: ${nextServiceTimeFormatted}`);
     
     // Get the base message
     const message = config.serviceHours?.offHoursMessage ||
       '感謝您的來訊，我們目前非客服營業時間。您可以留下相關訊息，我們將會在下一個工作日盡速回覆您。';
     
     // Return the message with the next working day information
-    return `${message}\n\n下一個工作時間: ${nextWorkDayFormatted} (${timezone})`;
+    return `${message}\n\n下一個工作時間: ${nextServiceTimeFormatted} (${timezone})`;
   }
 
   /**
    * Get the new ticket off-hours message with timezone information
    * @returns {string} The new ticket off-hours message
    */
-  getNewTicketOffHoursMessage() {
+  async getNewTicketOffHoursMessage(guildId) {
     // Ensure we're using the configured timezone
     const timezone = config.timezone || 'Asia/Taipei';
     
@@ -176,39 +324,19 @@ class ServiceHoursService {
     const now = moment.tz(timezone);
     logger.debug(`Current time for ticket in ${timezone}: ${now.format('YYYY-MM-DD HH:mm:ss')}`);
     
-    // Get working days and hours from config
-    const workdays = config.serviceHours?.workdays || [1, 2, 3, 4, 5]; // Monday-Friday by default
-    const startHour = config.serviceHours?.workHoursStart || 9;
+    // Get the next service time
+    const nextServiceTime = await this.getNextServiceTime(guildId);
     
-    // Find the next working day
-    let nextWorkDay = now.clone();
-    let daysChecked = 0;
-    
-    // Add at least one day since we're looking for the next working day
-    nextWorkDay.add(1, 'days');
-    
-    while (daysChecked < 7) { // Check up to 7 days ahead to find the next working day
-      if (workdays.includes(nextWorkDay.day())) {
-        break; // Found a working day
-      }
-      // If not a working day, move to the next day
-      nextWorkDay.add(1, 'days');
-      daysChecked++;
-    }
-    
-    // Set the time to the start hour
-    nextWorkDay.hour(startHour).minute(0).second(0);
-    
-    // Format the next working day
-    const nextWorkDayFormatted = nextWorkDay.format('YYYY-MM-DD HH:mm');
-    logger.debug(`Next working day for ticket in ${timezone}: ${nextWorkDayFormatted}`);
+    // Format the next service time
+    const nextServiceTimeFormatted = moment(nextServiceTime).tz(timezone).format('YYYY-MM-DD HH:mm');
+    logger.debug(`Next service time for ticket in ${timezone}: ${nextServiceTimeFormatted}`);
     
     // Get the base message
     const message = config.serviceHours?.newTicketOffHoursMessage ||
       '目前非客服處理時間，您可以先善用 AI 客服協助處理您的問題，如果無法解決再請轉為專人客服，我們會在下一個工作日盡速為您服務。';
     
     // Return the message with the next working day information
-    return `${message}\n\n下一個工作時間: ${nextWorkDayFormatted} (${timezone})`;
+    return `${message}\n\n下一個工作時間: ${nextServiceTimeFormatted} (${timezone})`;
   }
 
   /**

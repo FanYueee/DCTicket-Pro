@@ -168,12 +168,13 @@ class AIService {
 
   /**
    * Get the off-hours message
-   * @returns {string} The off-hours message
+   * @param {string} guildId - The guild ID
+   * @returns {Promise<string>} The off-hours message
    */
-  getOffHoursMessage() {
+  async getOffHoursMessage(guildId) {
     // If service hours module is available, use it
     if (serviceHoursModule && serviceHoursModule.service) {
-      const message = serviceHoursModule.service.getOffHoursMessage();
+      const message = await serviceHoursModule.service.getOffHoursMessage(guildId);
       logger.debug(`AI service got off-hours message: ${message}`);
       return message;
     }
@@ -193,12 +194,13 @@ class AIService {
 
   /**
    * Get the new ticket off-hours message
-   * @returns {string} The new ticket off-hours message
+   * @param {string} guildId - The guild ID
+   * @returns {Promise<string>} The new ticket off-hours message
    */
-  getNewTicketOffHoursMessage() {
+  async getNewTicketOffHoursMessage(guildId) {
     // If service hours module is available, use it
     if (serviceHoursModule && serviceHoursModule.service) {
-      const message = serviceHoursModule.service.getNewTicketOffHoursMessage();
+      const message = await serviceHoursModule.service.getNewTicketOffHoursMessage(guildId);
       logger.debug(`AI service got new ticket off-hours message: ${message}`);
       return message;
     }
