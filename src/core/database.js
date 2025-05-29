@@ -116,6 +116,29 @@ class Database {
         context TEXT NOT NULL,
         last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (ticket_id) REFERENCES tickets (id)
+      )`,
+
+      // Holidays Table for vacation/holiday management
+      `CREATE TABLE IF NOT EXISTS holidays (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        reason TEXT,
+        cron_expression TEXT,
+        start_date DATETIME,
+        end_date DATETIME,
+        is_recurring BOOLEAN DEFAULT 0,
+        enabled BOOLEAN DEFAULT 1,
+        created_by TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`,
+
+      // Holiday Settings Table
+      `CREATE TABLE IF NOT EXISTS holiday_settings (
+        guild_id TEXT PRIMARY KEY,
+        enabled BOOLEAN DEFAULT 1,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`
     ];
 

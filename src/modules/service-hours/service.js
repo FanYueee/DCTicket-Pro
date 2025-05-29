@@ -10,6 +10,89 @@ class ServiceHoursService {
   }
 
   /**
+   * Check if it's currently a holiday
+   * @param {string} guildId - The guild ID
+   * @returns {Promise<Object|null>} Holiday object if on holiday, null otherwise
+   */
+  async checkHoliday(guildId) {
+    try {
+      const timezone = config.timezone || 'Asia/Taipei';
+      const now = moment.tz(timezone);
+      
+      // Get holiday settings
+      const holidaySettings = await this.repository.getHolidaySettings(guildId);
+      if (!holidaySettings.enabled) {
+        return null;
+      }
+
+      // Get active holidays
+      const holidays = await this.repository.getActiveHolidays(guildId);
+      
+      for (const holiday of holidays) {
+        // Check one-time holidays (date range)
+        if (!holiday.is_recurring && holiday.start_date && holiday.end_date) {
+          const startDate = moment(holiday.start_date).tz(timezone);
+          const endDate = moment(holiday.end_date).tz(timezone);
+          
+          if (now.isBetween(startDate, endDate, null, '[]')) {
+            logger.debug(`Currently in holiday period: ${holiday.name}`);
+            return holiday;
+          }
+        }
+        
+        // Check recurring holidays (cron expression)
+        if (holiday.is_recurring && holiday.cron_expression) {
+          try {
+            const cronParts = holiday.cron_expression.split(' ');
+            
+            // Special handling for hour range expressions
+            if (cronParts.length >= 3 && cronParts[0] === '*' && cronParts[1] !== '*') {
+              const hourPart = cronParts[1];
+              const currentHour = now.hour();
+              
+              if (hourPart.includes('-')) {
+                const [startHour, endHour] = hourPart.split('-').map(h => parseInt(h));
+                if (currentHour >= startHour && currentHour <= endHour) {
+                  logger.debug(`In recurring holiday hours: ${holiday.name}`);
+                  return holiday;
+                }
+              } else {
+                const targetHour = parseInt(hourPart);
+                if (currentHour === targetHour) {
+                  logger.debug(`In recurring holiday hour: ${holiday.name}`);
+                  return holiday;
+                }
+              }
+            } else {
+              // Use cron parser for complex expressions
+              const interval = cronParser.parseExpression(holiday.cron_expression, {
+                currentDate: now.toDate(),
+                tz: timezone
+              });
+              
+              const prev = interval.prev();
+              const next = interval.next();
+              
+              // Check if we're within a holiday period (within 1 minute of cron match)
+              if (next.getTime() - now.toDate().getTime() < 60000 || now.toDate().getTime() - prev.getTime() < 60000) {
+                logger.debug(`Matched recurring holiday cron: ${holiday.name}`);
+                return holiday;
+              }
+            }
+          } catch (error) {
+            logger.error(`Error parsing holiday cron expression: ${error.message}`);
+          }
+        }
+      }
+      
+      return null;
+    } catch (error) {
+      logger.error(`Error checking holidays: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
    * Check if it's currently within service hours
    * @param {string} guildId - The guild ID
    * @returns {Promise<boolean>} Whether it's within service hours
@@ -19,6 +102,13 @@ class ServiceHoursService {
       // If module is disabled in config, always return true
       if (config.serviceHours && config.serviceHours.enabled === false) {
         return true;
+      }
+
+      // Check if it's currently a holiday
+      const holiday = await this.checkHoliday(guildId);
+      if (holiday) {
+        logger.debug(`Currently on holiday: ${holiday.name}`);
+        return false;
       }
 
       // First check if service hours are enabled for this guild
@@ -156,15 +246,17 @@ class ServiceHoursService {
     let nextServiceTime = null;
     
     try {
-      // First check cronjobs from database
-      const hours = await this.repository.getAllHours(guildId);
+      // First check cronjobs from database - only ENABLED ones
+      const hours = await this.repository.getActiveHours(guildId);
       
       if (hours && hours.length > 0) {
-        logger.debug(`Checking ${hours.length} cron expressions for next service time`);
+        logger.debug(`Checking ${hours.length} active cron expressions for next service time`);
+        logger.debug(`Active hours: ${hours.map(h => `ID:${h.id} - ${h.cron_expression}`).join(', ')}`);
         
         // Find the nearest next service time from all cronjobs
         for (const hour of hours) {
           try {
+            logger.debug(`Processing cron expression: ${hour.cron_expression} (ID: ${hour.id})`);
             const cronParts = hour.cron_expression.split(' ');
             
             // Special handling for hour range expressions (e.g., "* 8-9 * * *" or "* 11 * * *")
@@ -233,6 +325,8 @@ class ServiceHoursService {
         }
       }
       
+      logger.debug(`Final next service time: ${nextServiceTime ? moment(nextServiceTime).tz(timezone).format('YYYY-MM-DD HH:mm') : 'none found from cron'}`);
+      
       // If no cronjobs or all failed, fallback to config
       if (!nextServiceTime) {
         const workdays = config.serviceHours?.workdays || [1, 2, 3, 4, 5];
@@ -297,6 +391,12 @@ class ServiceHoursService {
     const now = moment.tz(timezone);
     logger.debug(`Current time in ${timezone}: ${now.format('YYYY-MM-DD HH:mm:ss')}`);
     
+    // Check if it's a holiday
+    const holiday = await this.checkHoliday(guildId);
+    if (holiday) {
+      return this.getHolidayMessage(guildId, holiday);
+    }
+    
     // Get the next service time
     const nextServiceTime = await this.getNextServiceTime(guildId);
     
@@ -324,6 +424,12 @@ class ServiceHoursService {
     const now = moment.tz(timezone);
     logger.debug(`Current time for ticket in ${timezone}: ${now.format('YYYY-MM-DD HH:mm:ss')}`);
     
+    // Check if it's a holiday
+    const holiday = await this.checkHoliday(guildId);
+    if (holiday) {
+      return this.getHolidayMessage(guildId, holiday);
+    }
+    
     // Get the next service time
     const nextServiceTime = await this.getNextServiceTime(guildId);
     
@@ -337,6 +443,56 @@ class ServiceHoursService {
     
     // Return the message with the next working day information
     return `${message}\n\n下一個工作時間: ${nextServiceTimeFormatted} (${timezone})`;
+  }
+
+  /**
+   * Get holiday message
+   * @param {string} guildId - The guild ID
+   * @param {Object} holiday - The holiday object
+   * @returns {Promise<string>} The holiday message
+   */
+  async getHolidayMessage(guildId, holiday) {
+    const timezone = config.timezone || 'Asia/Taipei';
+    const now = moment.tz(timezone);
+    
+    let message = `🏖️ **休假通知**\n\n`;
+    message += `目前為休假時間：**${holiday.name}**\n`;
+    
+    if (holiday.reason) {
+      message += `休假原因：${holiday.reason}\n`;
+    }
+    
+    // Calculate when the holiday ends
+    let resumeTime = null;
+    
+    if (!holiday.is_recurring && holiday.end_date) {
+      // For one-time holidays, use the end date
+      resumeTime = moment(holiday.end_date).tz(timezone);
+      message += `\n預計恢復服務時間：${resumeTime.format('YYYY-MM-DD HH:mm')} (${timezone})`;
+    } else {
+      // For recurring holidays, find the next service time
+      const nextServiceTime = await this.getNextServiceTimeIgnoringCurrentHoliday(guildId, holiday);
+      if (nextServiceTime) {
+        resumeTime = moment(nextServiceTime).tz(timezone);
+        message += `\n下一個工作時間：${resumeTime.format('YYYY-MM-DD HH:mm')} (${timezone})`;
+      }
+    }
+    
+    message += '\n\n您可以留下訊息，我們將在恢復服務後盡速回覆您。';
+    
+    return message;
+  }
+
+  /**
+   * Get next service time ignoring the current holiday
+   * @param {string} guildId - The guild ID
+   * @param {Object} currentHoliday - The current holiday to ignore
+   * @returns {Promise<Date>} The next service time
+   */
+  async getNextServiceTimeIgnoringCurrentHoliday(guildId, currentHoliday) {
+    // This is a simplified version - you may want to implement more complex logic
+    // For now, just call the regular getNextServiceTime
+    return this.getNextServiceTime(guildId);
   }
 
   /**

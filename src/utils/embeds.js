@@ -181,6 +181,69 @@ class Embeds {
       .setColor('#57F287')
       .setTimestamp(moment().tz(config.timezone || 'UTC').toDate());
   }
+
+  /**
+   * Create a holiday embed for ticket channels
+   * @param {Object} holiday - The holiday object
+   * @param {String} nextServiceTime - Formatted next service time string
+   * @returns {EmbedBuilder} The created embed
+   */
+  static holidayEmbed(holiday, nextServiceTime) {
+    const timezone = config.timezone || 'Asia/Taipei';
+    const embed = new EmbedBuilder()
+      .setTitle('🏖️ 休假通知')
+      .setColor('#FF6B6B')
+      .setTimestamp(moment().tz(timezone).toDate());
+
+    let description = `目前為休假時間：**${holiday.name}**\n`;
+    
+    if (holiday.reason) {
+      description += `\n📝 **休假原因**\n${holiday.reason}\n`;
+    }
+
+    if (nextServiceTime) {
+      description += `\n⏰ **預計恢復服務時間**\n${nextServiceTime}\n`;
+    }
+
+    description += '\n💌 您可以留下訊息，我們將在恢復服務後盡速回覆您。';
+    
+    embed.setDescription(description);
+
+    // Add fields based on holiday type
+    if (holiday.is_recurring) {
+      embed.addFields({
+        name: '休假類型',
+        value: '🔄 重複性休假',
+        inline: true
+      });
+      
+      if (holiday.cron_expression) {
+        embed.addFields({
+          name: '排程',
+          value: `\`${holiday.cron_expression}\``,
+          inline: true
+        });
+      }
+    } else {
+      embed.addFields({
+        name: '休假類型',
+        value: '📅 一次性休假',
+        inline: true
+      });
+      
+      if (holiday.start_date && holiday.end_date) {
+        const start = moment(holiday.start_date).tz(timezone).format('MM/DD HH:mm');
+        const end = moment(holiday.end_date).tz(timezone).format('MM/DD HH:mm');
+        embed.addFields({
+          name: '休假期間',
+          value: `${start} ~ ${end}`,
+          inline: true
+        });
+      }
+    }
+
+    return embed;
+  }
 }
 
 module.exports = Embeds;

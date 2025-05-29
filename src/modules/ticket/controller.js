@@ -368,22 +368,58 @@ class TicketController {
 
           // If outside service hours, send the new ticket off-hours message
           if (!isWithinHours) {
-            const newTicketOffHoursMessage = await aiService.getNewTicketOffHoursMessage(guild.id);
-            await channel.send(newTicketOffHoursMessage);
+            // Check if it's a holiday
+            const serviceHoursModule = require('../service-hours');
+            const holiday = await serviceHoursModule.service.checkHoliday(guild.id);
+            
+            if (holiday) {
+              // Send holiday embed
+              const timezone = config.timezone || 'Asia/Taipei';
+              let nextServiceTime = null;
+              
+              if (!holiday.is_recurring && holiday.end_date) {
+                nextServiceTime = moment(holiday.end_date).tz(timezone).format('YYYY-MM-DD HH:mm');
+              } else {
+                const next = await serviceHoursModule.service.getNextServiceTime(guild.id);
+                nextServiceTime = moment(next).tz(timezone).format('YYYY-MM-DD HH:mm');
+              }
+              
+              const holidayEmbed = Embeds.holidayEmbed(holiday, nextServiceTime);
+              await channel.send({ embeds: [holidayEmbed] });
+              
+              // Save the holiday message to database
+              await this.ticketService.saveMessage({
+                id: uuidv4(),
+                ticketId: ticketUuid,
+                userId: guild.members.me.id,
+                username: guild.members.me.user.tag,
+                content: JSON.stringify({
+                  isHolidayNotice: true,
+                  holidayId: holiday.id,
+                  timestamp: moment().tz(timezone).toISOString(),
+                  message: `Holiday: ${holiday.name}`
+                }),
+                timestamp: moment().tz(timezone).toDate()
+              });
+            } else {
+              // Regular off-hours message
+              const newTicketOffHoursMessage = await aiService.getNewTicketOffHoursMessage(guild.id);
+              await channel.send(newTicketOffHoursMessage);
 
-            // Save the message to the database with a special tag
-            await this.ticketService.saveMessage({
-              id: uuidv4(),
-              ticketId: ticketUuid,
-              userId: guild.members.me.id,
-              username: guild.members.me.user.tag,
-              content: JSON.stringify({
-                isNewTicketOffHoursNotice: true,
-                timestamp: moment().tz(config.timezone || 'Asia/Taipei').toISOString(),
-                message: newTicketOffHoursMessage
-              }),
-              timestamp: moment().tz(config.timezone || 'Asia/Taipei').toDate()
-            });
+              // Save the message to the database with a special tag
+              await this.ticketService.saveMessage({
+                id: uuidv4(),
+                ticketId: ticketUuid,
+                userId: guild.members.me.id,
+                username: guild.members.me.user.tag,
+                content: JSON.stringify({
+                  isNewTicketOffHoursNotice: true,
+                  timestamp: moment().tz(config.timezone || 'Asia/Taipei').toISOString(),
+                  message: newTicketOffHoursMessage
+                }),
+                timestamp: moment().tz(config.timezone || 'Asia/Taipei').toDate()
+              });
+            }
           }
 
           // Process the initial description with AI

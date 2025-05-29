@@ -81,17 +81,29 @@ module.exports = {
     return this;
   },
     
-  async execute(interaction) {
+  async execute(interaction, context) {
+    // If context is provided (new way), use it. Otherwise fall back to module references
+    const repo = context?.repository || repository;
+    const svc = context?.service || service;
+    
+    if (!repo) {
+      await interaction.reply({
+        content: '❌ 服務時間模組未正確初始化',
+        ephemeral: true
+      });
+      return;
+    }
+    
     const subcommand = interaction.options.getSubcommand();
     
     if (subcommand === 'view') {
-      await handleViewHours(interaction, repository);
+      await handleViewHours(interaction, repo);
     } else if (subcommand === 'add') {
-      await handleAddHours(interaction, repository);
+      await handleAddHours(interaction, repo);
     } else if (subcommand === 'del') {
-      await handleDeleteHours(interaction, repository);
+      await handleDeleteHours(interaction, repo);
     } else if (subcommand === 'toggle') {
-      await handleToggleHours(interaction, repository);
+      await handleToggleHours(interaction, repo);
     }
   }
 };

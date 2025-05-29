@@ -92,6 +92,38 @@ class ServiceHoursModule {
     return true;
   }
   
+  async onInteraction(interaction) {
+    try {
+      if (!interaction.isChatInputCommand()) return false;
+      
+      const command = this.commands.get(interaction.commandName);
+      if (!command) return false;
+      
+      // Execute the command with repository and service
+      await command.execute(interaction, {
+        repository: this.repository,
+        service: this.service
+      });
+      
+      return true;
+    } catch (error) {
+      logger.error(`Error handling service hours interaction: ${error.message}`);
+      
+      const errorMessage = {
+        content: '❌ 執行指令時發生錯誤',
+        ephemeral: true
+      };
+      
+      if (interaction.replied || interaction.deferred) {
+        await interaction.followUp(errorMessage);
+      } else {
+        await interaction.reply(errorMessage);
+      }
+      
+      return true;
+    }
+  }
+  
   async shutdown() {
     logger.info('Service hours module shutting down');
     return true;

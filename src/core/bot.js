@@ -159,10 +159,21 @@ class Bot {
   async onInteraction(interaction) {
     try {
       if (interaction.isChatInputCommand()) {
-        const command = this.commands.get(interaction.commandName);
-        if (!command) return;
-
-        await command.execute(interaction);
+        // First, let modules handle their own commands
+        let handled = false;
+        for (const [name, module] of this.modules.entries()) {
+          if (typeof module.onInteraction === 'function') {
+            handled = await module.onInteraction(interaction);
+            if (handled) break;
+          }
+        }
+        
+        // If no module handled it, try bot's own commands
+        if (!handled) {
+          const command = this.commands.get(interaction.commandName);
+          if (!command) return;
+          await command.execute(interaction);
+        }
       } 
       else if (interaction.isMessageContextMenuCommand()) {
         // Handle message context menu commands (message commands)
