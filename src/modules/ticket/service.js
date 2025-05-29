@@ -320,6 +320,21 @@ class TicketService {
       throw error;
     }
   }
+
+  /**
+   * Transfer a ticket to another department
+   * @param {String} ticketId - The ticket ID
+   * @param {String} newDepartmentId - The new department ID
+   * @return {Promise<Boolean>} Success status
+   */
+  async transferTicketDepartment(ticketId, newDepartmentId) {
+    try {
+      return await this.repository.updateTicketDepartment(ticketId, newDepartmentId);
+    } catch (error) {
+      logger.error(`Error transferring ticket department: ${error.message}`);
+      throw error;
+    }
+  }
 }
 
 module.exports = TicketService;

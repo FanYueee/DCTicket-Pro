@@ -612,6 +612,25 @@ class TicketRepository {
       throw error;
     }
   }
+
+  /**
+   * Update ticket department
+   * @param {String} ticketId - The ticket ID
+   * @param {String} newDepartmentId - The new department ID
+   * @return {Promise<Boolean>} Success status
+   */
+  async updateTicketDepartment(ticketId, newDepartmentId) {
+    try {
+      await database.run(
+        'UPDATE tickets SET department_id = ?, updated_at = ? WHERE id = ?',
+        [newDepartmentId, moment().tz(config.timezone || 'UTC').toISOString(), ticketId]
+      );
+      return true;
+    } catch (error) {
+      logger.error(`Database error updating ticket department: ${error.message}`);
+      throw error;
+    }
+  }
 }
 
 module.exports = TicketRepository;

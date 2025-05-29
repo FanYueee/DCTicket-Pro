@@ -1,4 +1,4 @@
-const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ChannelType, PermissionFlagsBits } = require('discord.js');
+const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ChannelType, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const { v4: uuidv4 } = require('uuid');
 const logger = require('../../core/logger');
 const config = require('../../core/config');
@@ -1022,6 +1022,154 @@ class TicketController {
       }
     } catch (error) {
       logger.error(`Error handling ticket message: ${error.message}`);
+    }
+  }
+
+  /**
+   * Transfer a ticket to another department
+   * @param {Interaction} interaction - The command interaction
+   * @param {Object} ticket - The ticket object
+   * @param {String} targetDepartmentId - The target department ID
+   * @return {Promise<void>}
+   */
+  async transferTicket(interaction, ticket, targetDepartmentId) {
+    try {
+      await interaction.deferReply();
+
+      // Get department information
+      const currentDepartment = await this.ticketService.getDepartment(ticket.departmentId);
+      const targetDepartment = await this.ticketService.getDepartment(targetDepartmentId);
+      
+      if (!targetDepartment) {
+        await interaction.editReply({
+          content: '找不到目標部門。'
+        });
+        return;
+      }
+
+      // Get the guild and user
+      const guild = interaction.guild;
+      const user = await interaction.client.users.fetch(ticket.userId).catch(() => null);
+      
+      if (!user) {
+        await interaction.editReply({
+          content: '無法找到客服單的原始用戶。'
+        });
+        return;
+      }
+
+      // Get the current channel
+      const currentChannel = interaction.channel;
+      
+      // Verify channel still exists
+      if (!currentChannel || currentChannel.deleted) {
+        await interaction.editReply({
+          content: '頻道已被刪除，無法完成轉移。'
+        });
+        return;
+      }
+      
+      // Extract the ticket ID from current channel name (the UUID first section)
+      const currentChannelName = currentChannel.name;
+      const ticketIdMatch = currentChannelName.match(/([a-f0-9]{8})$/);
+      const ticketIdSection = ticketIdMatch ? ticketIdMatch[1] : ticket.id.split('-')[0];
+      
+      // Update channel name with new department name
+      const channelName = `${targetDepartment.name}-${ticketIdSection}`;
+      try {
+        await currentChannel.setName(channelName);
+      } catch (error) {
+        logger.warn(`Could not rename channel: ${error.message}`);
+      }
+
+      // Update channel category if different
+      if (targetDepartment.categoryId && targetDepartment.categoryId !== currentDepartment.categoryId) {
+        try {
+          await currentChannel.setParent(targetDepartment.categoryId);
+        } catch (error) {
+          logger.warn(`Could not move channel to new category: ${error.message}`);
+        }
+      }
+
+      // Update channel permissions - add new roles before removing old ones to maintain access
+      // First, add permissions for new department roles
+      const newDepartmentRoles = await this.ticketService.getDepartmentRoles(targetDepartmentId);
+      for (const roleId of newDepartmentRoles) {
+        try {
+          await currentChannel.permissionOverwrites.create(roleId, {
+            ViewChannel: true,
+            SendMessages: true,
+            ReadMessageHistory: true,
+            AttachFiles: true,
+            EmbedLinks: true
+          });
+        } catch (error) {
+          logger.warn(`Could not add role ${roleId} permissions: ${error.message}`);
+        }
+      }
+
+      // Small delay to ensure permissions are applied
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Then remove permissions for old department roles
+      const oldDepartmentRoles = await this.ticketService.getDepartmentRoles(ticket.departmentId);
+      for (const roleId of oldDepartmentRoles) {
+        try {
+          // Only delete if it's not in the new department roles (to handle cases where a role is in both departments)
+          if (!newDepartmentRoles.includes(roleId)) {
+            await currentChannel.permissionOverwrites.delete(roleId);
+          }
+        } catch (error) {
+          logger.warn(`Could not remove role ${roleId} permissions: ${error.message}`);
+        }
+      }
+
+      // Update the ticket in database only after all channel operations succeed
+      await this.ticketService.transferTicketDepartment(ticket.id, targetDepartmentId);
+
+      // Send notification message
+      const transferEmbed = new EmbedBuilder()
+        .setTitle('🔄 客服單已轉移')
+        .setDescription(`此客服單已從 **${currentDepartment.name}** 部門轉移至 **${targetDepartment.name}** 部門。`)
+        .setColor(0x0099FF)
+        .addFields(
+          {
+            name: '轉移者',
+            value: interaction.user.tag,
+            inline: true
+          },
+          {
+            name: '轉移時間',
+            value: moment().tz(config.timezone || 'Asia/Taipei').format('YYYY/MM/DD HH:mm:ss'),
+            inline: true
+          }
+        )
+        .setTimestamp();
+
+      await interaction.editReply({
+        embeds: [transferEmbed]
+      });
+
+      // Log the transfer
+      logger.info(`Ticket ${ticket.id} transferred from ${ticket.departmentId} to ${targetDepartmentId} by ${interaction.user.tag}`);
+
+    } catch (error) {
+      logger.error(`Error transferring ticket: ${error.message}`);
+      
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({
+            content: '轉移客服單時出錯。請稍後再試。',
+            ephemeral: true
+          });
+        } else {
+          await interaction.editReply({
+            content: '轉移客服單時出錯。請稍後再試。'
+          });
+        }
+      } catch (replyError) {
+        logger.error(`Failed to reply to interaction: ${replyError.message}`);
+      }
     }
   }
 }
