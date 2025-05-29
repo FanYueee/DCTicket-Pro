@@ -139,6 +139,39 @@ class Database {
         guild_id TEXT PRIMARY KEY,
         enabled BOOLEAN DEFAULT 1,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`,
+
+      // Ticket Reminder Settings Table
+      `CREATE TABLE IF NOT EXISTS ticket_reminder_settings (
+        guild_id TEXT PRIMARY KEY,
+        enabled BOOLEAN DEFAULT 0,
+        reminder_timeout INTEGER DEFAULT 600,
+        reminder_role_id TEXT,
+        reminder_mode TEXT DEFAULT 'once',
+        reminder_interval INTEGER DEFAULT 60,
+        reminder_max_count INTEGER DEFAULT 3,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`,
+
+      // Staff Reminder Preferences Table
+      `CREATE TABLE IF NOT EXISTS staff_reminder_preferences (
+        user_id TEXT PRIMARY KEY,
+        receive_reminders BOOLEAN DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`,
+
+      // Ticket Response Tracking Table
+      `CREATE TABLE IF NOT EXISTS ticket_response_tracking (
+        ticket_id TEXT PRIMARY KEY,
+        last_customer_message_at DATETIME,
+        last_staff_response_at DATETIME,
+        reminder_sent BOOLEAN DEFAULT 0,
+        reminder_sent_at DATETIME,
+        reminder_count INTEGER DEFAULT 0,
+        last_reminder_at DATETIME,
+        FOREIGN KEY (ticket_id) REFERENCES tickets (id)
       )`
     ];
 

@@ -216,6 +216,9 @@ class TicketRepository {
         userId: ticket.user_id,
         departmentId: ticket.department_id,
         status: ticket.status,
+        aiHandled: Boolean(ticket.ai_handled),
+        humanHandled: Boolean(ticket.human_handled),
+        staffId: ticket.staff_id,
         createdAt: new Date(ticket.created_at),
         closedAt: ticket.closed_at ? new Date(ticket.closed_at) : null
       };
@@ -319,10 +322,12 @@ class TicketRepository {
    */
   async assignTicketToStaff(ticketId, staffId) {
     try {
-      await database.run(
+      logger.debug(`Assigning ticket ${ticketId} to staff ${staffId}, setting human_handled = 1`);
+      const result = await database.run(
         'UPDATE tickets SET human_handled = ?, staff_id = ?, updated_at = ? WHERE id = ?',
         [1, staffId, moment().tz(config.timezone || 'UTC').toISOString(), ticketId]
       );
+      logger.debug(`Update result: changes=${result.changes}`);
       return true;
     } catch (error) {
       logger.error(`Database error assigning ticket to staff: ${error.message}`);

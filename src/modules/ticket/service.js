@@ -189,6 +189,21 @@ class TicketService {
   }
 
   /**
+   * Update ticket AI handling status
+   * @param {String} ticketId - The ticket ID
+   * @param {Boolean} aiHandled - Whether the ticket was handled by AI
+   * @return {Promise<Boolean>} Success status
+   */
+  async updateTicketAIHandled(ticketId, aiHandled) {
+    try {
+      return await this.repository.updateTicketAIHandled(ticketId, aiHandled);
+    } catch (error) {
+      logger.error(`Error updating ticket AI handled status: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
    * Save a message to a ticket
    * @param {Object} message - The message object
    * @return {Promise<Object>} The saved message

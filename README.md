@@ -34,6 +34,7 @@ A powerful Discord ticket bot with modular architecture, AI-powered support, and
 - **Role-Based Access**: Configure staff roles per department
 - **Category Organization**: Automatic channel categorization
 - **Message Archiving**: Complete conversation history
+- **Staff Reminder System**: Automatic notifications for unresponded tickets
 - **Modular Architecture**: Enable/disable features as needed
 
 ## 📋 Requirements
@@ -183,12 +184,26 @@ serviceHours: {
 - `/category create` - Create department categories
 - `/role set` - Configure staff roles
 
+### Reminder Commands
+- `/reminder enable` - Enable ticket reminder notifications
+- `/reminder disable` - Disable ticket reminder notifications
+- `/reminder setrole [role]` - Set the role to receive reminders
+- `/reminder settimeout [minutes]` - Set reminder timeout (1-60 minutes)
+- `/reminder setmode [mode]` - Set reminder mode (once/continuous/limited)
+- `/reminder setinterval [seconds]` - Set repeat interval (30-600 seconds)
+- `/reminder setmaxcount [count]` - Set maximum reminder count (1-10)
+- `/reminder preference [receive]` - Set personal reminder preference
+- `/reminder setstaff [user] [receive]` - Admin: Set staff reminder preference
+- `/reminder status` - View current reminder settings
+- `/reminder debug` - Admin: Debug reminder functionality
+
 ### AI Commands
 - `/aiprompt view [department]` - View current AI prompt
 - `/aiprompt edit [department]` - Edit department prompt
 - `/aiprompt savetofile [department]` - Save prompt to file
 - `/aiprompt loadfromfile [department]` - Load prompt from file
 - `/analyze` - Analyze ticket conversation
+- `AI Analysis` - Right-click message for AI analysis (supports text, images, files)
 
 ### Service Commands
 - `/services [user]` - Display user's WHMCS services
@@ -256,6 +271,34 @@ logs/
 └── whmcs/         # WHMCS module logs
 ```
 
+## 🚀 Advanced Features
+
+### Multimodal AI Analysis
+- Support for text message analysis
+- Image content recognition and analysis
+- Code file review
+- Document content understanding
+
+### Smart Conversation Management
+- Automatic conversation context saving
+- History preservation during department transfers
+- Seamless AI to human conversation handoff
+- Duplicate response prevention mechanism
+
+### Staff Reminder System
+- **Automatic Monitoring**: Continuously checks for unresponded tickets
+- **Three Reminder Modes**: Once, continuous, or limited count reminders
+- **Service Hours Integration**: Only sends reminders during business hours and non-holiday periods
+- **Individual Preferences**: Staff can choose whether to receive reminders
+- **Role Management**: Automatically manages reminder role assignments
+- **Real-time Tracking**: Starts timing from when tickets are transferred to human staff
+
+### Holiday Management System
+- One-time holiday settings
+- Recurring holidays (e.g., every Sunday)
+- Custom holiday messages
+- AI behavior adjustment during holidays
+
 ## 🤝 Contributing
 
 1. Fork the repository
@@ -271,6 +314,39 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## 📞 Support
 
 For issues and feature requests, please use the [GitHub Issues](https://github.com/fanyueee/DCTicket-Pro/issues) page.
+
+## 💡 Usage Tips
+
+### Initial Setup
+1. Ensure all necessary role IDs are correctly configured
+2. Recommend testing on a test server first
+3. Carefully read the README files for each module
+
+### Best Practices
+- Regularly backup database files (`data/` directory)
+- Monitor log files to troubleshoot issues
+- Adjust AI temperature parameters based on actual needs
+- Set department-specific prompts for different departments
+
+### Troubleshooting
+- Check `logs/error.log` for error messages
+- Confirm all environment variables are correctly set
+- Verify the bot has sufficient permissions
+- Use `/analyze` command to diagnose AI behavior
+- Use `/reminder debug` to check reminder system status
+- Ensure reminder roles are correctly set and exist
+
+### Reminder System Usage Guide
+1. **Initial Setup**: First use `/reminder setrole` to set the reminder role
+2. **Enable Feature**: Use `/reminder enable` to activate the reminder system
+3. **Adjust Parameters**: Set reminder time and mode as needed
+4. **Staff Management**: Have staff use `/reminder preference` to set personal preferences
+5. **Monitor Operation**: Use `/reminder status` to check configuration status
+
+### Reminder Mode Explanations
+- **once (Single)**: Remind only once per ticket, suitable for general use
+- **continuous (Continuous)**: Keep reminding until staff responds, suitable for high-priority support
+- **limited (Limited)**: Limit the number of reminders, balancing reminder effectiveness with message interference
 
 ---
 

@@ -7,6 +7,7 @@ const TicketController = require('./controller');
 const TicketService = require('./service');
 const TicketRepository = require('./repository');
 const { service: aiService } = require('../ai');
+const reminderService = require('./reminder/service');
 
 class TicketModule {
   constructor(bot) {
@@ -77,6 +78,10 @@ class TicketModule {
     try {
       // Check for existing panels and restore them
       await this.controller.restorePanels(this.bot.client);
+      
+      // Initialize reminder service
+      reminderService.initialize(this.bot.client);
+      
       return true;
     } catch (error) {
       logger.error(`Error in ticket module onReady: ${error.message}`);
@@ -176,7 +181,8 @@ class TicketModule {
   }
 
   async shutdown() {
-    // No specific cleanup needed yet
+    // Stop reminder service
+    reminderService.stopReminderChecks();
     logger.info('Ticket module shutting down');
     return true;
   }

@@ -5,6 +5,7 @@ const config = require('../../core/config');
 const Embeds = require('../../utils/embeds');
 const Permissions = require('../../utils/permissions');
 const { service: aiService } = require('../ai');
+const reminderService = require('./reminder/service');
 const moment = require('moment-timezone');
 
 class TicketController {
@@ -602,6 +603,9 @@ class TicketController {
       // First update ticket status to closed then close the ticket
       await this.ticketService.updateTicketStatus(ticket.id, 'closed');
       await this.ticketService.closeTicket(ticket.id);
+
+      // Clear reminder tracking for closed ticket
+      await reminderService.handleTicketClosure(ticket.id);
       
       // Remove send message permissions for all users to prevent further messages
       await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, {
@@ -701,8 +705,23 @@ class TicketController {
         });
       }
 
-      // Update the ticket status to waiting for staff
+      logger.debug(`Handling human handoff for ticket ${ticket.id}`);
+      
+      // Update the ticket status to waiting for staff and mark as human handled
       await this.ticketService.updateTicketStatus(ticket.id, 'waitingStaff');
+      logger.debug(`Updated ticket status to waitingStaff`);
+      
+      await this.ticketService.updateTicketAIHandled(ticket.id, false);
+      logger.debug(`Updated AI handled to false`);
+      
+      // Mark ticket as requiring human handling (this sets human_handled = 1)
+      await this.ticketService.assignTicketToStaff(ticket.id, null); // null staff ID means any staff can handle
+      logger.debug(`Assigned ticket to staff (human_handled should now be 1)`);
+      
+      // Initialize reminder tracking with the ticket creation time as the "last customer message"
+      // This way, the countdown starts from when the ticket was created
+      const mockMessage = { author: { tag: 'System', id: ticket.userId } };
+      await reminderService.handleTicketMessage(mockMessage, ticket, false, ticket.createdAt);
 
       // Get department details for mention
       const department = await this.ticketService.getDepartment(ticket.departmentId);
@@ -872,59 +891,75 @@ class TicketController {
       const ticket = await this.ticketService.getTicketByChannelId(message.channel.id);
       if (!ticket) return; // Not a ticket channel
 
+      // Check if message is from staff or customer
+      const member = await message.guild.members.fetch(message.author.id).catch(() => null);
+      let isStaff = false;
+      if (member) {
+        const departmentRoles = await this.ticketService.getDepartmentRoles(ticket.departmentId);
+        isStaff = departmentRoles.some(roleId => member.roles.cache.has(roleId));
+      }
+
+      logger.debug(`Processing message in ticket ${ticket.id}: ` +
+        `status=${ticket.status}, human_handled=${ticket.human_handled}, ` +
+        `isStaff=${isStaff}, authorId=${message.author.id}, ticketUserId=${ticket.userId}`);
+
+      // Handle reminder tracking first (for both staff and customer messages)
+      if (ticket.status === 'waitingStaff' || ticket.human_handled) {
+        if (isStaff) {
+          // Staff response
+          await reminderService.handleTicketMessage(message, ticket, true);
+        } else if (message.author.id === ticket.userId) {
+          // Customer message
+          await reminderService.handleTicketMessage(message, ticket, false);
+        }
+      }
+
       // Skip AI processing if AI is disabled or ticket is waiting for staff
       if (!config.ai || !config.ai.enabled || ticket.status === 'waitingStaff') return;
 
       // Skip AI processing if the message author isn't the ticket creator
       if (message.author.id !== ticket.userId) {
-        // If the message is from a staff member, update the ticket status
-        const member = await message.guild.members.fetch(message.author.id).catch(() => null);
-        if (member) {
-          const departmentRoles = await this.ticketService.getDepartmentRoles(ticket.departmentId);
-          const isStaff = departmentRoles.some(roleId => member.roles.cache.has(roleId));
+        if (isStaff) {
+          // Update ticket to waiting for staff status
+          await this.ticketService.updateTicketStatus(ticket.id, 'waitingStaff');
+          await this.ticketService.assignTicketToStaff(ticket.id, message.author.id);
 
-          if (isStaff) {
-            // Update ticket to waiting for staff status
-            await this.ticketService.updateTicketStatus(ticket.id, 'waitingStaff');
-            await this.ticketService.assignTicketToStaff(ticket.id, message.author.id);
+          // Update the ticket embed with new status
+          const user = await message.client.users.fetch(ticket.userId).catch(() => null);
+          const userTag = user ? user.tag : 'Unknown User';
 
-            // Update the ticket embed with new status
-            const user = await message.client.users.fetch(ticket.userId).catch(() => null);
-            const userTag = user ? user.tag : 'Unknown User';
+          // Get the ticket description from messages
+          const messages = await this.ticketService.getTicketMessages(ticket.id);
+          let description = '無描述';
 
-            // Get the ticket description from messages
-            const messages = await this.ticketService.getTicketMessages(ticket.id);
-            let description = '無描述';
-
-            // Find the description message
-            for (const message of messages) {
-              try {
-                const content = JSON.parse(message.content);
-                if (content.isDescription) {
-                  description = content.text;
-                  break;
-                }
-              } catch (e) {
-                // Not a JSON message, skip
+          // Find the description message
+          for (const message of messages) {
+            try {
+              const content = JSON.parse(message.content);
+              if (content.isDescription) {
+                description = content.text;
+                break;
               }
+            } catch (e) {
+              // Not a JSON message, skip
             }
-
-            // Create updated ticket info embed
-            const ticketEmbed = Embeds.ticketInfoEmbed({
-              id: ticket.id.split('-')[0],
-              departmentId: ticket.departmentId,
-              description: description,
-              status: 'waitingStaff',
-              createdAt: ticket.createdAt
-            }, userTag);
-
-            // Send updated status message
-            await message.channel.send({
-              content: `<@${message.author.id}> 已接手處理此客服單。`,
-              embeds: [ticketEmbed],
-              components: [Embeds.ticketControlButtons(false)]
-            });
           }
+
+          // Create updated ticket info embed
+          const ticketEmbed = Embeds.ticketInfoEmbed({
+            id: ticket.id.split('-')[0],
+            departmentId: ticket.departmentId,
+            description: description,
+            status: 'waitingStaff',
+            createdAt: ticket.createdAt
+          }, userTag);
+
+          // Send updated status message
+          await message.channel.send({
+            content: `<@${message.author.id}> 已接手處理此客服單。`,
+            embeds: [ticketEmbed],
+            components: [Embeds.ticketControlButtons(false)]
+          });
         }
         return;
       }
