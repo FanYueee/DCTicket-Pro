@@ -350,6 +350,36 @@ class TicketService {
       throw error;
     }
   }
+
+  /**
+   * Record a ticket invite
+   * @param {String} ticketId - The ticket ID
+   * @param {String} inviterId - The inviter user ID
+   * @param {String} inviteeId - The invitee user ID
+   * @return {Promise<Boolean>} Success status
+   */
+  async recordInvite(ticketId, inviterId, inviteeId) {
+    try {
+      return await this.repository.recordInvite(ticketId, inviterId, inviteeId);
+    } catch (error) {
+      logger.error(`Error recording invite: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all invites for a ticket
+   * @param {String} ticketId - The ticket ID
+   * @return {Promise<Array>} Array of invite objects
+   */
+  async getTicketInvites(ticketId) {
+    try {
+      return await this.repository.getTicketInvites(ticketId);
+    } catch (error) {
+      logger.error(`Error getting ticket invites: ${error.message}`);
+      throw error;
+    }
+  }
 }
 
 module.exports = TicketService;

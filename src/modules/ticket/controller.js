@@ -627,6 +627,14 @@ class TicketController {
         }).catch(() => {}); // Ignore errors if role was deleted
       }
       
+      // For invited users
+      const invites = await this.ticketService.getTicketInvites(ticket.id);
+      for (const invite of invites) {
+        await interaction.channel.permissionOverwrites.edit(invite.invitee_id, {
+          SendMessages: false
+        }).catch(() => {}); // Ignore errors if user left server
+      }
+      
       // Archive all messages to the database
       await this.archiveTicketMessages(interaction.channel, ticket.id);
       
@@ -1205,6 +1213,103 @@ class TicketController {
       } catch (replyError) {
         logger.error(`Failed to reply to interaction: ${replyError.message}`);
       }
+    }
+  }
+
+  /**
+   * Invite a user to a ticket
+   * @param {Interaction} interaction - The command interaction
+   * @param {Object} ticket - The ticket object
+   * @param {User} invitee - The user to invite
+   * @return {Promise<void>}
+   */
+  async inviteUserToTicket(interaction, ticket, invitee) {
+    await interaction.deferReply();
+    
+    try {
+      // Check if the invitee is already invited
+      const existingInvites = await this.ticketService.getTicketInvites(ticket.id);
+      const alreadyInvited = existingInvites.some(invite => invite.invitee_id === invitee.id);
+      
+      if (alreadyInvited) {
+        await interaction.editReply({
+          content: `❌ ${invitee} 已經被邀請到此客服單了。`
+        });
+        return;
+      }
+      
+      // Check if the invitee already has permission
+      const channel = interaction.channel;
+      const permissions = channel.permissionOverwrites.cache.get(invitee.id);
+      
+      if (permissions && permissions.allow.has(PermissionFlagsBits.ViewChannel)) {
+        await interaction.editReply({
+          content: `❌ ${invitee} 已經可以查看此客服單。`
+        });
+        return;
+      }
+      
+      // Add permissions for the invitee
+      await channel.permissionOverwrites.create(invitee.id, {
+        ViewChannel: true,
+        SendMessages: true,
+        ReadMessageHistory: true,
+        AttachFiles: true,
+        EmbedLinks: true
+      });
+      
+      // Record the invite in the database
+      await this.ticketService.recordInvite(ticket.id, interaction.user.id, invitee.id);
+      
+      // Create an embed for the invitation notification
+      const inviteEmbed = new EmbedBuilder()
+        .setColor(0x00FF00)
+        .setTitle('🎫 用戶已被邀請')
+        .setDescription(`${invitee} 已被 ${interaction.user} 邀請加入此客服單。`)
+        .addFields(
+          { name: '邀請者', value: interaction.user.tag, inline: true },
+          { name: '被邀請者', value: invitee.tag, inline: true },
+          { name: '權限', value: '✅ 查看頻道\n✅ 發送訊息\n✅ 查看歷史訊息\n✅ 附加檔案\n❌ 關閉客服單', inline: false }
+        )
+        .setTimestamp();
+      
+      // Send notification in the ticket channel
+      await channel.send({ embeds: [inviteEmbed] });
+      
+      // Update the interaction
+      await interaction.editReply({
+        content: `✅ 已成功邀請 ${invitee} 加入此客服單。`
+      });
+      
+      // Try to notify the invitee via DM
+      try {
+        const dmEmbed = new EmbedBuilder()
+          .setColor(0x0099FF)
+          .setTitle('🎫 您已被邀請到客服單')
+          .setDescription(`您已被 ${interaction.user.tag} 邀請加入客服單。`)
+          .addFields(
+            { name: '客服單頻道', value: `<#${channel.id}>`, inline: true },
+            { name: '部門', value: config.departments.find(d => d.id === ticket.departmentId)?.name || '未知', inline: true }
+          )
+          .setFooter({ text: '請點擊上方頻道連結查看客服單' })
+          .setTimestamp();
+        
+        const dmChannel = await invitee.createDM();
+        await dmChannel.send({ embeds: [dmEmbed] });
+      } catch (dmError) {
+        // Cannot send DM, ignore the error
+        logger.info(`Could not send DM to ${invitee.tag}: ${dmError.message}`);
+      }
+      
+      logger.info(`User ${invitee.tag} invited to ticket ${ticket.id} by ${interaction.user.tag}`);
+      
+    } catch (error) {
+      logger.error(`Error inviting user to ticket: ${error.message}`);
+      logger.error(error.stack);
+      
+      await interaction.editReply({
+        content: `❌ 邀請用戶時出錯: ${error.message}`
+      });
     }
   }
 }

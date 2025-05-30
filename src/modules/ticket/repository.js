@@ -636,6 +636,43 @@ class TicketRepository {
       throw error;
     }
   }
+
+  /**
+   * Record a ticket invite
+   * @param {String} ticketId - The ticket ID
+   * @param {String} inviterId - The inviter user ID
+   * @param {String} inviteeId - The invitee user ID
+   * @return {Promise<Boolean>} Success status
+   */
+  async recordInvite(ticketId, inviterId, inviteeId) {
+    try {
+      await database.run(
+        'INSERT INTO ticket_invites (ticket_id, inviter_id, invitee_id) VALUES (?, ?, ?)',
+        [ticketId, inviterId, inviteeId]
+      );
+      return true;
+    } catch (error) {
+      logger.error(`Database error recording invite: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all invites for a ticket
+   * @param {String} ticketId - The ticket ID
+   * @return {Promise<Array>} Array of invite objects
+   */
+  async getTicketInvites(ticketId) {
+    try {
+      return await database.all(
+        'SELECT * FROM ticket_invites WHERE ticket_id = ? ORDER BY created_at DESC',
+        [ticketId]
+      );
+    } catch (error) {
+      logger.error(`Database error getting ticket invites: ${error.message}`);
+      throw error;
+    }
+  }
 }
 
 module.exports = TicketRepository;

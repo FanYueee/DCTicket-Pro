@@ -8,6 +8,7 @@ A powerful Discord ticket bot with modular architecture, AI-powered support, and
 - **Interactive Panels**: Beautiful ticket creation panels with department-specific buttons
 - **Multi-Department Support**: Tech support, billing, and general inquiries
 - **Smart Permissions**: Automatic permission management for users and staff
+- **Guest Invitation**: Ticket creators and staff can invite additional users to collaborate
 - **Status Tracking**: Open → Waiting for Staff → Closed workflow
 - **Transcript System**: Automatic conversation archiving with export functionality
 
@@ -181,6 +182,8 @@ serviceHours: {
 ### Ticket Commands
 - `/setup` - Create a ticket panel in the current channel
 - `/close` - Close the current ticket
+- `/invite [user]` - Invite a user to view and participate in current ticket
+- `/transfer [department]` - Transfer ticket to another department
 - `/category create` - Create department categories
 - `/role set` - Configure staff roles
 

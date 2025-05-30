@@ -21,6 +21,7 @@ The ticket system is the core module of DCTicket Pro, providing comprehensive cu
 - Automatic channel permissions for ticket creator
 - Department-specific staff role access
 - Secure isolation between tickets
+- Guest invitation system for collaborative support
 
 ## 📋 Commands
 
@@ -31,6 +32,8 @@ The ticket system is the core module of DCTicket Pro, providing comprehensive cu
 
 ### Management Commands  
 - `/close` - Close the current ticket
+- `/invite [user]` - Invite a user to view and participate in the current ticket
+- `/transfer [department]` - Transfer ticket to another department
 - Ticket panel buttons for user interactions
 - Staff control buttons in ticket channels
 
@@ -75,6 +78,7 @@ Automated staff notification system:
 - `messages`: Conversation history
 - `panels`: Ticket panel locations
 - `department_roles`: Staff role assignments
+- `ticket_invites`: Guest invitation records
 
 ### Reminder Tables
 - `ticket_reminder_settings`: Guild reminder configuration
@@ -176,6 +180,13 @@ useCategoryChannels: true // Organizes tickets in categories
 - Role-based access control
 - Secure ticket isolation
 - Staff override capabilities
+
+### Guest Invitation System
+- Ticket creators and staff can invite additional users
+- Invited users can view and send messages only
+- Cannot close tickets or invite others
+- Automatic permission cleanup on ticket closure
+- DM notifications for invited users
 
 ### Transcript System
 - Automatic conversation export

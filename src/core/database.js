@@ -172,6 +172,16 @@ class Database {
         reminder_count INTEGER DEFAULT 0,
         last_reminder_at DATETIME,
         FOREIGN KEY (ticket_id) REFERENCES tickets (id)
+      )`,
+
+      // Ticket Invites Table
+      `CREATE TABLE IF NOT EXISTS ticket_invites (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticket_id TEXT NOT NULL,
+        inviter_id TEXT NOT NULL,
+        invitee_id TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (ticket_id) REFERENCES tickets (id)
       )`
     ];
 
