@@ -171,8 +171,35 @@ class ReminderService {
         reminderText += ')';
       }
       
+      // Create action row with button
+      const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+      
+      const actionRow = new ActionRowBuilder()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId(`no_response_needed_${ticket.id}`)
+            .setLabel('無須回應')
+            .setStyle(ButtonStyle.Secondary)
+            .setEmoji('✅')
+        );
+      
+      // Remove old reminder message button if exists
+      const existingTracking = await this.reminderRepository.getResponseTracking(ticket.id);
+      if (existingTracking.lastReminderMessageId && config.reminder.notificationChannelId) {
+        try {
+          const oldMessage = await targetChannel.messages.fetch(existingTracking.lastReminderMessageId);
+          if (oldMessage && oldMessage.components.length > 0) {
+            // Remove the button completely, keep only the text
+            await oldMessage.edit({ components: [] });
+          }
+        } catch (error) {
+          logger.warn(`Could not update old reminder message: ${error.message}`);
+        }
+      }
+      
       const reminderMessage = await targetChannel.send({
-        content: reminderText
+        content: reminderText,
+        components: [actionRow]
       });
       
       // Update tracking to mark reminder as sent
@@ -180,7 +207,8 @@ class ReminderService {
         reminderSent: true,
         reminderSentAt: moment().tz(config.timezone || 'UTC').toISOString(),
         reminderCount: reminderCount,
-        lastReminderAt: moment().tz(config.timezone || 'UTC').toISOString()
+        lastReminderAt: moment().tz(config.timezone || 'UTC').toISOString(),
+        lastReminderMessageId: reminderMessage.id
       });
       
       const channelInfo = config.reminder.notificationChannelId ? 
@@ -262,15 +290,73 @@ class ReminderService {
           lastReminderAt: null
         });
       } else {
-        // Customer message - update last customer message time
+        // Customer message - update last customer message time and reset no response needed status
         const messageType = customTimestamp ? 'initial customer issue' : 'customer message';
-        logger.debug(`${messageType} from ${message.author.tag} in ticket ${ticket.id} - updating last customer message time to ${timestamp}`);
+        logger.debug(`${messageType} from ${message.author.tag} in ticket ${ticket.id} - updating last customer message time to ${timestamp} and resetting no response needed status`);
         await this.reminderRepository.updateResponseTracking(ticket.id, {
-          lastCustomerMessageAt: timestamp
+          lastCustomerMessageAt: timestamp,
+          noResponseNeeded: false  // Reset no response needed when customer sends new message
         });
       }
     } catch (error) {
       logger.error(`Error handling ticket message for reminder tracking: ${error.message}`);
+    }
+  }
+
+  /**
+   * Handle "no response needed" button click
+   * @param {ButtonInteraction} interaction - The button interaction
+   */
+  async handleNoResponseNeeded(interaction) {
+    try {
+      const ticketId = interaction.customId.replace('no_response_needed_', '');
+      
+      // Check if user has permission (has reminder role or is admin)
+      const settings = await this.reminderRepository.getReminderSettings(interaction.guild.id);
+      const hasReminderRole = settings.reminderRoleId && interaction.member.roles.cache.has(settings.reminderRoleId);
+      const isAdmin = interaction.member.permissions.has('Administrator');
+      
+      if (!hasReminderRole && !isAdmin) {
+        return await interaction.reply({
+          content: '❌ 您沒有權限執行此操作。',
+          ephemeral: true
+        });
+      }
+      
+      // Update tracking to mark as no response needed
+      await this.reminderRepository.updateResponseTracking(ticketId, {
+        noResponseNeeded: true,
+        reminderSent: false,
+        reminderSentAt: null
+      });
+      
+      // Disable the button
+      const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+      const disabledActionRow = new ActionRowBuilder()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId('no_response_disabled')
+            .setLabel(`已標記為無須回應 - ${interaction.user.displayName}`)
+            .setStyle(ButtonStyle.Success)
+            .setEmoji('✅')
+            .setDisabled(true)
+        );
+      
+      await interaction.update({
+        components: [disabledActionRow]
+      });
+      
+      logger.info(`Ticket ${ticketId} marked as no response needed by ${interaction.user.tag}`);
+    } catch (error) {
+      logger.error(`Error handling no response needed: ${error.message}`);
+      try {
+        await interaction.reply({
+          content: '❌ 處理請求時發生錯誤',
+          ephemeral: true
+        });
+      } catch (replyError) {
+        logger.error(`Error sending error reply: ${replyError.message}`);
+      }
     }
   }
 

@@ -171,6 +171,8 @@ class Database {
         reminder_sent_at DATETIME,
         reminder_count INTEGER DEFAULT 0,
         last_reminder_at DATETIME,
+        no_response_needed BOOLEAN DEFAULT 0,
+        last_reminder_message_id TEXT,
         FOREIGN KEY (ticket_id) REFERENCES tickets (id)
       )`,
 
@@ -187,6 +189,19 @@ class Database {
 
     for (const query of queries) {
       await this.run(query);
+    }
+
+    // Add new columns to existing tables if they don't exist
+    try {
+      await this.run(`ALTER TABLE ticket_response_tracking ADD COLUMN no_response_needed BOOLEAN DEFAULT 0`);
+    } catch (error) {
+      // Column might already exist, ignore error
+    }
+    
+    try {
+      await this.run(`ALTER TABLE ticket_response_tracking ADD COLUMN last_reminder_message_id TEXT`);
+    } catch (error) {
+      // Column might already exist, ignore error
     }
 
     // Insert default departments if they don't exist yet

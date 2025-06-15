@@ -215,6 +215,16 @@ class ReminderRepository {
           updateValues.push(tracking.lastReminderAt);
         }
         
+        if (tracking.noResponseNeeded !== undefined) {
+          updateFields.push('no_response_needed = ?');
+          updateValues.push(tracking.noResponseNeeded ? 1 : 0);
+        }
+        
+        if (tracking.lastReminderMessageId !== undefined) {
+          updateFields.push('last_reminder_message_id = ?');
+          updateValues.push(tracking.lastReminderMessageId);
+        }
+        
         updateValues.push(ticketId);
         
         await database.run(
@@ -225,8 +235,9 @@ class ReminderRepository {
         await database.run(
           `INSERT INTO ticket_response_tracking 
            (ticket_id, last_customer_message_at, last_staff_response_at, 
-            reminder_sent, reminder_sent_at, reminder_count, last_reminder_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            reminder_sent, reminder_sent_at, reminder_count, last_reminder_at,
+            no_response_needed, last_reminder_message_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             ticketId,
             tracking.lastCustomerMessageAt || null,
@@ -234,7 +245,9 @@ class ReminderRepository {
             tracking.reminderSent ? 1 : 0,
             tracking.reminderSentAt || null,
             tracking.reminderCount || 0,
-            tracking.lastReminderAt || null
+            tracking.lastReminderAt || null,
+            tracking.noResponseNeeded ? 1 : 0,
+            tracking.lastReminderMessageId || null
           ]
         );
       }
@@ -266,7 +279,9 @@ class ReminderRepository {
           reminderSent: false,
           reminderSentAt: null,
           reminderCount: 0,
-          lastReminderAt: null
+          lastReminderAt: null,
+          noResponseNeeded: false,
+          lastReminderMessageId: null
         };
       }
       
@@ -277,7 +292,9 @@ class ReminderRepository {
         reminderSent: Boolean(tracking.reminder_sent),
         reminderSentAt: tracking.reminder_sent_at ? new Date(tracking.reminder_sent_at) : null,
         reminderCount: tracking.reminder_count || 0,
-        lastReminderAt: tracking.last_reminder_at ? new Date(tracking.last_reminder_at) : null
+        lastReminderAt: tracking.last_reminder_at ? new Date(tracking.last_reminder_at) : null,
+        noResponseNeeded: Boolean(tracking.no_response_needed),
+        lastReminderMessageId: tracking.last_reminder_message_id
       };
     } catch (error) {
       logger.error(`Database error getting response tracking: ${error.message}`);
@@ -378,6 +395,7 @@ class ReminderRepository {
            AND t.human_handled = 1
            AND trt.last_customer_message_at IS NOT NULL
            AND (trt.last_staff_response_at IS NULL OR trt.last_customer_message_at > trt.last_staff_response_at)
+           AND (trt.no_response_needed IS NULL OR trt.no_response_needed = 0)
            AND (
              (trt.reminder_sent = 0 AND trt.last_customer_message_at < ?)
              OR (trt.reminder_sent = 1 AND trt.last_reminder_at < ? AND (
@@ -403,6 +421,7 @@ class ReminderRepository {
            AND trt.reminder_sent = 0
            AND trt.last_customer_message_at IS NOT NULL
            AND (trt.last_staff_response_at IS NULL OR trt.last_customer_message_at > trt.last_staff_response_at)
+           AND (trt.no_response_needed IS NULL OR trt.no_response_needed = 0)
            AND trt.last_customer_message_at < ?
            AND EXISTS (
              SELECT 1 FROM settings s 

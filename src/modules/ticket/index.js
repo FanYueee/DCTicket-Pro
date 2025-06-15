@@ -115,6 +115,11 @@ class TicketModule {
           }
           return true;
         }
+        else if (interaction.customId.startsWith('no_response_needed_')) {
+          // Handle "no response needed" button from reminder system
+          await reminderService.handleNoResponseNeeded(interaction);
+          return true;
+        }
       }
       else if (interaction.isModalSubmit()) {
         // Handle modal submissions
