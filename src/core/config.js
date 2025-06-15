@@ -113,6 +113,12 @@ module.exports = {
     }
   },
 
+  // Reminder Configuration
+  reminder: {
+    // If set, reminder notifications will be sent to this channel instead of the ticket channel
+    notificationChannelId: process.env.REMINDER_NOTIFICATION_CHANNEL || null
+  },
+
   // WHMCS Integration Configuration
   whmcs: {
     enabled: process.env.WHMCS_ENABLED === 'true',

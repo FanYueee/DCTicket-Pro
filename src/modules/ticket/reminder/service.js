@@ -131,8 +131,8 @@ class ReminderService {
    */
   async sendReminder(guild, ticket, settings) {
     try {
-      const channel = await guild.channels.fetch(ticket.channelId);
-      if (!channel) {
+      const ticketChannel = await guild.channels.fetch(ticket.channelId);
+      if (!ticketChannel) {
         logger.warn(`Could not find channel ${ticket.channelId} for reminder`);
         return;
       }
@@ -144,8 +144,24 @@ class ReminderService {
       // Calculate time since last customer message
       const timeSinceMessage = moment().diff(moment(ticket.lastCustomerMessageAt), 'minutes');
       
-      // Send reminder message - tag with simple text
-      let reminderText = `<@&${settings.reminderRoleId}> ⏰ 此客服單已經 **${timeSinceMessage} 分鐘**沒有工作人員回應，請盡快處理。`;
+      // Determine where to send the reminder
+      let targetChannel = ticketChannel;
+      let reminderText;
+      
+      if (config.reminder.notificationChannelId) {
+        // Send to notification channel with channel tag
+        try {
+          targetChannel = await guild.channels.fetch(config.reminder.notificationChannelId);
+          reminderText = `<@&${settings.reminderRoleId}> ⏰ ${ticketChannel} 已經 **${timeSinceMessage} 分鐘**沒有工作人員回應，請盡快處理。`;
+        } catch (error) {
+          logger.warn(`Could not find notification channel ${config.reminder.notificationChannelId}, falling back to ticket channel`);
+          targetChannel = ticketChannel;
+          reminderText = `<@&${settings.reminderRoleId}> ⏰ 此客服單已經 **${timeSinceMessage} 分鐘**沒有工作人員回應，請盡快處理。`;
+        }
+      } else {
+        // Send to ticket channel (original behavior)
+        reminderText = `<@&${settings.reminderRoleId}> ⏰ 此客服單已經 **${timeSinceMessage} 分鐘**沒有工作人員回應，請盡快處理。`;
+      }
       
       if (settings.reminderMode === 'limited' || settings.reminderMode === 'continuous') {
         reminderText += ` (第 ${reminderCount} 次提醒`;
@@ -155,7 +171,7 @@ class ReminderService {
         reminderText += ')';
       }
       
-      const reminderMessage = await channel.send({
+      const reminderMessage = await targetChannel.send({
         content: reminderText
       });
       
@@ -167,7 +183,10 @@ class ReminderService {
         lastReminderAt: moment().tz(config.timezone || 'UTC').toISOString()
       });
       
-      logger.info(`Sent reminder #${reminderCount} for ticket ${ticket.id}`);
+      const channelInfo = config.reminder.notificationChannelId ? 
+        `notification channel (${targetChannel.name})` : 
+        `ticket channel (${ticketChannel.name})`;
+      logger.info(`Sent reminder #${reminderCount} for ticket ${ticket.id} to ${channelInfo}`);
     } catch (error) {
       logger.error(`Error sending reminder for ticket ${ticket.id}: ${error.message}`);
     }
